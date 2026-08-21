@@ -1,0 +1,38 @@
+---
+description: Fast UI test loop — writes (or reuses) a Playwright test for a described user flow, runs it, and hands off to flow-execute for the fix/rerun loop. No brainstorm/plan stage, no approval gate. Verify is the Playwright test's exit code + report only, never Claude's own opinion of the UI.
+---
+
+# /playwright-test
+
+Arguments: `$ARGUMENTS` — one of:
+- `--jira <ID>` — fetch the ticket via the Jira/Atlassian MCP connector (title + description + acceptance criteria) as the user-flow description. If that MCP is not authorized, say so plainly and STOP — do not fall back to guessing the flow. (Kept for consistency with `/flow`/`/fix-feature`/`/optimize`'s input adapter, even though README's own `/playwright-test` section only describes a bare feature/flow name — this is a design choice for consistency, not a silent assumption.)
+- `--file <path>` — read the file via the Read tool.
+  - `.md` / `.txt` / `.pdf`: read directly.
+  - `.doc` / `.docx`: these cannot be read directly. Tell the user to convert to `.md` or `.pdf` first (or, if `pandoc` is available, offer to convert it), then STOP — do not attempt to parse it as text.
+- Bare text: use it verbatim as the user-flow description.
+
+No other input form is supported — do not guess the source from the argument's shape.
+
+The content here is a **user-flow description** (what a user does in the UI, step by step, and what should happen), not a feature spec or bug report — do not route it through `flow-brainstorm` or `flow-plan`.
+
+## Orchestration
+
+1. Parse `$ARGUMENTS` for exactly one of the three forms above. Build the normalized flow block: `{source, content, origin_link}`.
+2. Check whether Playwright is actually installed/configured in the target repo: look for a `playwright.config.ts`/`.js` file and a `@playwright/test` (or `playwright`) dependency in `package.json`. If either is missing, **say so plainly and STOP** — do not install, configure, or scaffold Playwright yourself; setting up test infrastructure is out of scope for this command.
+3. Search the target repo for an existing Playwright test covering this flow (via Glob over the project's test directory — e.g. `tests/**/*.spec.ts`, `e2e/**/*.spec.ts`, or wherever `playwright.config.*` points its `testDir` at) before writing a new one, to avoid a duplicate test for the same flow.
+4. Do **not** invoke `flow-brainstorm` or `flow-plan` — this command has no human approval gate. Synthesize a minimal implementation plan inline:
+   - Task 1: if Step 3 found no existing test for this flow, write one derived from the user-flow description (concrete steps → Playwright actions/assertions, following the target repo's existing test file conventions if any exist, otherwise the framework's own conventions). If an existing test already covers this flow, skip straight to Task 2 and say so plainly in the plan.
+   - Task 2: run the Playwright test (the project's documented Playwright run command — check `CLAUDE.md` first; if undocumented, use `npx playwright test <file>` scoped to just the new/target test file, never the whole suite).
+5. Write this synthesized plan to `docs/flow/plans/YYYY-MM-DD-playwright-<slug>-plan.md`, where `<slug>` is derived from the first few words of the flow description, lowercased, with every character other than `a-z`, `0-9`, and `-` stripped or replaced with `-` (collapse repeats) — never pass raw flow-description text into a file path unsanitized. Record-keeping only: no `planner` subagent dispatch, no `AskUserQuestion` approval wait. State plainly in the file itself that it was auto-synthesized by `/playwright-test`, not reviewed like a `flow-plan` output.
+6. Invoke the `flow-execute` skill directly with that plan file's path. `flow-execute` handles the ≤3-round verify retry loop (via the `verifier` subagent, which already has a Playwright MCP branch for frontend/UI changes) and the mandatory `reviewer` subagent — do not reimplement retry logic here, and do not add a separate screenshot/trace-reading step of your own outside that loop.
+7. Print `flow-execute`'s final report verbatim to the user — do not summarize away a FAIL into something softer, and do not append your own subjective read of whether the UI "looks right." The Playwright test's exit code and report from `verifier` are the only verdict that counts.
+
+## Hard rules
+
+- Never invoke `flow-brainstorm` or `flow-plan` from this command — there is no approval gate, by design, unlike `/flow` and `/flow-batch`.
+- Never install, initialize, or configure Playwright in the target repo if it's missing — stop and report the gap instead.
+- Never write a duplicate Playwright test for a flow that already has one — always Glob for an existing test first.
+- Never invent a Jira ID or file content if the fetch/read fails — stop and report the actual error.
+- Never skip writing the record-keeping plan file, even though there is no approval wait on it.
+- Never substitute your own opinion of the UI's appearance/behavior for the Playwright test's actual pass/fail result — verify is the exit code + report only.
+- Never let `flow-execute` skip its own verify/review loop — this command relies on it entirely for the "max 3 lần lặp" requirement; do not add a second retry loop here.
