@@ -7,7 +7,7 @@ description: Second stage of the /flow pipeline. Takes an approved design/spec, 
 
 ## Input
 
-The approved design (chat text) or spec file path from `flow-brainstorm`. You only run after that approval has been given — the `/flow` command enforces this, but if invoked directly, ask for confirmation the design was approved before proceeding.
+The approved design (chat text) or spec file path from `flow-brainstorm`. You only run after that approval has been given. If invoked by a command that explicitly states the input is already an approved design (e.g. `/scaffold` passing a spec/API description that skips `flow-brainstorm` entirely), trust that statement and proceed directly — do not ask for a second confirmation, that would be a redundant gate the caller already accounted for. Only ask for confirmation when invoked with no such statement and it's genuinely unclear whether approval happened.
 
 ## Process
 

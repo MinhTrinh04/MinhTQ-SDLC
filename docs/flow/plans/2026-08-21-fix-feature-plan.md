@@ -39,10 +39,10 @@ The content here is a **bug report + steps to reproduce**, not a feature spec �
 
 1. Parse `$ARGUMENTS` for exactly one of the three forms above. Build the normalized bug report block: `{source, content, origin_link}`.
 2. Do **not** invoke `flow-brainstorm` or `flow-plan` — this command has no human approval gate. Synthesize a minimal implementation plan inline, derived directly from the repro steps in the bug report:
-   - Task 1: write a failing test that reproduces the bug (derive the exact repro steps/inputs from the bug report; run it to confirm it fails before touching any fix code).
+   - Task 1: if the target project has a test runner, write a failing test that reproduces the bug (derive the exact repro steps/inputs from the bug report; run it to confirm it fails before touching any fix code). If the project has **no** test runner (check for a documented test command in its `CLAUDE.md` first), fall back to a manual verification step instead: a single documented command (matching the style `verifier` expects from `CLAUDE.md`) that reproduces the bug's exact observable symptom, with its current (buggy) output recorded — do not silently skip this task just because no test framework exists.
    - Task 2: implement the minimal fix.
-   - Task 3: rerun the test from Task 1 to confirm it now PASSes.
-3. Write this synthesized plan to `docs/flow/plans/YYYY-MM-DD-fix-<slug>-plan.md` (slug derived from a short form of the bug title/first few words) — record-keeping only: no `planner` subagent dispatch, no `AskUserQuestion` approval wait. State plainly in the file itself that it was auto-synthesized by `/fix-feature`, not reviewed like a `flow-plan` output.
+   - Task 3: rerun the test (or manual verification command) from Task 1 to confirm it now PASSes / shows the corrected output.
+3. Write this synthesized plan to `docs/flow/plans/YYYY-MM-DD-fix-<slug>-plan.md`, where `<slug>` is derived from the first few words of the bug title, lowercased, with every character other than `a-z`, `0-9`, and `-` stripped or replaced with `-` (collapse repeats) — never pass raw bug-report text into a file path unsanitized. Record-keeping only: no `planner` subagent dispatch, no `AskUserQuestion` approval wait. State plainly in the file itself that it was auto-synthesized by `/fix-feature`, not reviewed like a `flow-plan` output.
 4. Invoke the `flow-execute` skill directly with that plan file's path. `flow-execute` handles the ≤3-round verify retry loop (via the `verifier` subagent) and the mandatory `reviewer` subagent — do not reimplement retry logic here.
 5. Print `flow-execute`'s final report verbatim to the user — do not summarize away a FAIL into something softer.
 
