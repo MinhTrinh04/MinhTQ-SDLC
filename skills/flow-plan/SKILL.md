@@ -16,9 +16,14 @@ The approved design (chat text) or spec file path from `flow-brainstorm`. You on
 3. No placeholders: every step must have real content — actual code, actual commands, actual expected output. Never "add tests for the above" or "TBD".
 4. Save to `docs/flow/plans/YYYY-MM-DD-<topic>-plan.md` in the target repo, commit it.
 5. Self-review: check every requirement from the approved design has a task, check no placeholders slipped in, check type/signature names are consistent task-to-task. Fix inline.
-6. **STOP.** Report the plan's path and wait for explicit human approval before `flow-execute` may run.
+6. **STOP and ask via `AskUserQuestion`.** Report the plan's path, then present the gate as an explicit choice, e.g.:
+   - "Approve — proceed to flow-execute" (recommended)
+   - "Request changes — describe what to adjust" (free text via the tool's built-in Other option)
+   - "Reject — stop here"
+   Never end the turn on a plain prose question expecting free-text "ok". Do not let `flow-execute` run until "Approve" is selected.
 
 ## Hard rules
 
 - Never execute anything from the plan yourself — you only write it.
 - Never accept the `planner` subagent's draft verbatim if it contains placeholders or vague steps — tighten it before saving.
+- The approval gate in Step 6 uses `AskUserQuestion` with concrete options — never a bare prose question expecting free-text reply.

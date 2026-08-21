@@ -24,10 +24,15 @@ You receive one normalized requirement block: `{source: "jira"|"file"|"text", co
    - Spike: 2-3 sentences, get a nod, done (no design doc — the terminal state is a recommendation, produced by `flow-execute`'s investigation, not this skill).
    - Bounded: a few sentences to a few short paragraphs, in chat.
    - Architectural: sectioned design, then write to `docs/flow/specs/YYYY-MM-DD-<topic>-design.md`, commit it.
-7. **STOP.** Do not proceed to `flow-plan` until the human has explicitly approved. This gate is never skipped, regardless of how small the change looks.
+7. **STOP and ask via `AskUserQuestion`.** Never end the turn on a plain prose question waiting for free-text "ok". Present the approval gate as an explicit choice, e.g.:
+   - "Approve — proceed to flow-plan" (recommended)
+   - "Request changes — describe what to adjust" (free text via the tool's built-in Other option)
+   - "Reject — stop here"
+   Do not proceed to `flow-plan` until "Approve" is selected. This gate is never skipped, regardless of how small the change looks.
 
 ## Hard rules
 
 - Never invoke `flow-plan` or `flow-execute` yourself from inside this skill — the `/flow` command orchestrates the handoff after seeing approval.
 - Never treat "the requirement looks complete" as a reason to skip asking about ambiguity you actually found — if you found it, ask it.
 - If mid-brainstorm you discover the work is bigger than the initial classification (hidden complexity), say so and re-classify — never downgrade, only upgrade.
+- Every clarifying question in Step 4 and the approval gate in Step 7 use `AskUserQuestion` with concrete options — never a bare prose question expecting free-text reply, so the human always gets an explicit choice to click instead of having to type a full sentence back.

@@ -17,9 +17,9 @@ No other input form is supported — do not guess the source from the argument's
 
 1. Parse `$ARGUMENTS` for exactly one of the three forms above. Build the normalized requirement block: `{source, content, origin_link}`.
 2. Invoke the `flow-brainstorm` skill with that block.
-3. **Wait for explicit human approval** of the design. Do not proceed on an ambiguous or implied yes — ask directly if unclear.
+3. **Wait for explicit human approval** of the design — `flow-brainstorm` itself asks this via `AskUserQuestion` with concrete options (Approve/Request changes/Reject), never a bare prose question. Do not proceed on an ambiguous or implied yes.
 4. Invoke the `flow-plan` skill with the approved design.
-5. **Wait for explicit human approval** of the plan.
+5. **Wait for explicit human approval** of the plan — `flow-plan` itself asks this via `AskUserQuestion` the same way.
 6. Invoke the `flow-execute` skill with the approved plan's file path.
 7. Print `flow-execute`'s final report verbatim to the user — do not summarize away a FAIL into something softer.
 

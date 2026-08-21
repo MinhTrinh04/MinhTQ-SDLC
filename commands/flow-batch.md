@@ -16,9 +16,9 @@ Build a list of normalized requirement blocks: `[{name, source, content, origin_
 For each feature in the list, **in order, one at a time**:
 
 1. Invoke the `flow-brainstorm` skill with that feature's requirement block.
-2. **Wait for explicit human approval** of the design before moving on. Never batch multiple approvals into one prompt — one feature's design, one approval, then proceed.
+2. **Wait for explicit human approval** of the design before moving on — `flow-brainstorm` asks this via `AskUserQuestion` with concrete options (Approve/Request changes/Reject), never a bare prose question. Never batch multiple features' approvals into one prompt — one feature's design, one approval, then proceed.
 3. Invoke the `flow-plan` skill with the approved design.
-4. **Wait for explicit human approval** of the plan.
+4. **Wait for explicit human approval** of the plan — `flow-plan` asks this via `AskUserQuestion` the same way.
 5. Record `{name, planPath, repoPath}` for this feature once its plan is approved, then move to the next feature in the list.
 
 Only once every feature in the list has an approved plan does Pha 2 begin. If a feature's brainstorm reveals it should be dropped or split, say so and adjust the list — do not silently carry a bad feature into Pha 2.
