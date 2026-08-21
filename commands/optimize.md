@@ -24,10 +24,11 @@ No other input form is supported — do not guess the source from the argument's
 5. Wait for `flow-brainstorm`'s own approval gate (its own `AskUserQuestion`, Approve/Request changes/Reject) confirming the *set of approaches* is sound — this is not yet the "pick one" gate.
 6. Once approved, present the 2-3 approaches to the human via a **separate** `AskUserQuestion` call, one option per approach, for them to pick exactly one. Do not proceed until one is explicitly selected.
 7. Synthesize a minimal plan file from the chosen approach only (same pattern as `/fix-feature`: no `flow-plan` stage here), write it to `docs/flow/plans/YYYY-MM-DD-optimize-<slug>-plan.md`, stating plainly it was auto-synthesized from the chosen approach, not a `flow-plan` output.
-8. Invoke `flow-execute` with that plan file's path to implement the chosen approach only.
-9. Re-run the exact same benchmark command from Step 2/3. Compare to baseline.
-   - If NOT better: revert `flow-execute`'s commit(s) — use `git revert <sha>..<sha>` if the branch has already been pushed/shared, or `git reset --hard <pre-execute-sha>` if it's still local/unshared. Report the optimization was reverted, with the before/after numbers shown plainly.
-   - If better: keep it. Report before/after numbers.
+8. **Record the current commit before touching anything**: run `git rev-parse HEAD` in the target repo and keep that SHA as `<pre-execute-sha>` — Step 9's revert depends on this value existing; do not skip it even though nothing else uses it yet.
+9. Invoke `flow-execute` with that plan file's path to implement the chosen approach only.
+10. Re-run the exact same benchmark command from Step 2/3. Compare to baseline.
+    - If NOT better: revert `flow-execute`'s commit(s) using the `<pre-execute-sha>` recorded in Step 8 — `git revert <pre-execute-sha>..HEAD` if the branch has already been pushed/shared, or `git reset --hard <pre-execute-sha>` if it's still local/unshared. Report the optimization was reverted, with the before/after numbers shown plainly.
+    - If better: keep it. Report before/after numbers.
 
 ## Hard rules
 
