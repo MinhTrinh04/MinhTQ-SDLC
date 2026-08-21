@@ -154,3 +154,59 @@ approach, không để `flow-brainstorm` tự chọn).
 4. Test end-to-end `/flow "mô tả việc nhỏ"` trên 1 project thật (bounded path, không cần MCP
    Jira) trước khi test `--jira`/`--file`
 5. `--jira` cần authorize MCP Atlassian trước khi test
+6. `/flow-batch` (Mục 7) triển khai sau khi `/flow` đơn lẻ chạy ổn định
+
+---
+
+## 7. Chạy nhiều tính năng song song — `/flow-batch`
+
+**Insight cốt lõi:** duyệt (design + plan) là 2 điểm bắt buộc có người, **không song song hoá
+được** — người chỉ đọc 1 chỗ 1 lúc. Nhưng `flow-execute` + `verifier` + `reviewer` (sau khi plan
+đã duyệt) đã tự chạy autonomous sẵn trong thiết kế Mục 1, không cần người can thiệp giữa chừng —
+đây là phần song song hoá được.
+
+### 7.1 Input
+
+```
+/flow-batch --jira "PROJ-1,PROJ-2,PROJ-3"
+/flow-batch --file "a.md,b.md,c.md"
+/flow-batch (nhiều dòng mô tả text, mỗi dòng 1 feature)
+```
+
+Mỗi item trong batch dùng đúng input adapter ở Mục 4 (flag rõ ràng, không auto-detect).
+
+### 7.2 Pha 1 — Brainstorm + Plan (tuần tự, có người duyệt)
+
+Với từng feature trong batch, theo thứ tự:
+`flow-brainstorm` → ⏸ duyệt #1 → `flow-plan` → ⏸ duyệt #2.
+
+Làm lần lượt trong chat chính (không song song — người là nút thắt cổ chai có chủ đích, đúng
+nguyên tắc "con người giữ quyền quyết định cuối" ở README mục 0.4). Kết thúc pha 1: N plan file
+đã duyệt, mỗi file ứng với 1 feature.
+
+### 7.3 Pha 2 — Execute (song song, tự động, cách ly)
+
+- Mỗi feature được cấp 1 git worktree + branch riêng (tránh N feature đụng file nhau khi
+  sửa chung 1 working tree).
+- Dùng Workflow tool: `parallel()` N lời gọi `agent()`, mỗi agent chạy trọn
+  `flow-execute` + retry loop với `verifier` (tối đa 3 vòng, đúng Mục 1) + `reviewer` bắt buộc,
+  trên đúng plan đã duyệt của feature đó, `isolation: 'worktree'`.
+- Không giới hạn concurrency cứng — để Workflow tool tự cap theo `min(16, CPU-2)`, feature thừa
+  tự xếp hàng chờ slot trống. Phù hợp quy mô 3-5 feature nêu ra ban đầu; nếu batch lớn hơn nhiều,
+  Workflow tự nhiên giãn thời gian chứ không tràn tài nguyên.
+- Không dừng chờ duyệt giữa chừng trong pha này (đã duyệt xong ở Pha 1, đúng nguyên tắc chỉ
+  duyệt ở 2 điểm design/plan).
+
+### 7.4 Output
+
+Báo cáo tổng hợp cuối: từng feature — pass/fail, verify bằng gì, branch/worktree nào chứa kết
+quả. Người tự merge từng branch theo ý (dùng `superpowers:finishing-a-development-branch` cho
+từng cái, không tự động merge hàng loạt).
+
+### 7.5 Ràng buộc cần biết
+
+- Gọi Workflow tool thật sự (không chỉ thiết kế) cần người dùng opt-in rõ bằng lời ở lượt gọi đó
+  (từ khoá "ultracode", hoặc yêu cầu trực tiếp "dùng workflow/multi-agent") — đây là hành vi
+  runtime của harness, không phải giới hạn thiết kế, nhưng cần nhớ khi thực thi `/flow-batch`.
+- `isolation: 'worktree'` tốn thời gian setup + disk mỗi agent — hợp lý cho batch vài feature,
+  không nên dùng cho batch hàng chục feature nhỏ lẻ.
