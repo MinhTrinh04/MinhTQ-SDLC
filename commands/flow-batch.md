@@ -1,5 +1,5 @@
 ---
-description: Run flow-brainstorm+flow-plan sequentially (gated) for a batch of features, then fan flow-execute out in parallel, one isolated worktree per feature, via the Workflow tool.
+description: Run flow-brainstorm+flow-plan sequentially (gated) for a batch of features; as soon as each feature's plan is approved, immediately dispatch it to execute+verify+review in the background, one isolated worktree per feature, via the Agent tool.
 ---
 
 # /flow-batch
@@ -19,49 +19,19 @@ For each feature in the list, **in order, one at a time**:
 2. **Wait for explicit human approval** of the design before moving on — `flow-brainstorm` asks this via `AskUserQuestion` with concrete options (Approve/Request changes/Reject), never a bare prose question. Never batch multiple features' approvals into one prompt — one feature's design, one approval, then proceed.
 3. Invoke the `flow-plan` skill with the approved design.
 4. **Wait for explicit human approval** of the plan — `flow-plan` asks this via `AskUserQuestion` the same way.
-5. Record `{name, planPath, repoPath}` for this feature once its plan is approved, then move to the next feature in the list.
+5. The moment this feature's plan is approved, immediately dispatch it into Pha 2 (below) — do not wait for any other feature in the list. Then move on to the next feature's brainstorm.
 
-Only once every feature in the list has an approved plan does Pha 2 begin. If a feature's brainstorm reveals it should be dropped or split, say so and adjust the list — do not silently carry a bad feature into Pha 2.
+If a feature's brainstorm reveals it should be dropped or split, say so and adjust the list before dispatching it — never dispatch a bad feature into Pha 2 just to keep the loop moving.
 
-## Pha 2 — Execute (parallel, isolated, autonomous)
+## Pha 2 — Execute (immediate dispatch, isolated, autonomous, background)
 
-Once all plans are approved, call the `Workflow` tool with `args: { features: [{name, planPath, repoPath}, ...] }` (from Pha 1) and this exact script:
+As soon as a feature's plan is approved in Pha 1 (step 5 above), call the `Agent` tool for that single feature — do not batch this call, do not wait for other features. Pass `isolation: "worktree"`. Do not pass `run_in_background: false` — the `Agent` tool runs subagents in the background by default, so this call returns immediately and the main thread proceeds straight to the next feature's Pha 1 loop.
 
-    export const meta = {
-      name: 'flow-batch-execute',
-      description: 'Execute approved flow plans for multiple features in parallel, one isolated worktree per feature',
-      phases: [{ title: 'Execute' }],
-    }
+The Agent's prompt (substitute `name`, `planPath`, `repoPath` for this one feature):
 
-    const REPORT_SCHEMA = {
-      type: 'object',
-      properties: {
-        status: { type: 'string', enum: ['PASS', 'FAIL'] },
-        verifyRounds: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              round: { type: 'number' },
-              command: { type: 'string' },
-              result: { type: 'string', enum: ['PASS', 'FAIL'] },
-              output: { type: 'string' },
-            },
-            required: ['round', 'command', 'result'],
-          },
-        },
-        reviewFindings: { type: 'string' },
-        summary: { type: 'string' },
-      },
-      required: ['status', 'verifyRounds', 'reviewFindings', 'summary'],
-    }
+    You are executing an approved implementation plan for feature "{name}", in repo {repoPath}.
 
-    phase('Execute')
-
-    function buildPrompt(f) {
-      return `You are executing an approved implementation plan for feature "${f.name}", in repo ${f.repoPath}.
-
-    Read the plan file at ${f.planPath} fully before starting.
+    Read the plan file at {planPath} fully before starting.
 
     Execute its tasks in order exactly as written: test-first when a test runner exists, minimal implementation, run the test, commit — do not skip steps, do not add steps not in the plan. Never touch files outside what the plan's Files sections list. If the plan is missing something required to finish a task, stop and report it instead of inventing scope.
 
@@ -69,24 +39,32 @@ Once all plans are approved, call the `Workflow` tool with `args: { features: [{
 
     If a command FAILs: read the failure output, fix the specific issue, re-run. Hard limit: 3 verify rounds total. If round 3 still FAILs, STOP — do not attempt a 4th fix — and report status FAIL with all 3 rounds' exact command and output.
 
-    Once verify PASSes (status PASS), review your own diff adversarially, as if you did not write it: look specifically for logic edge cases, security issues (injection, auth bypass, secrets, unsafe deserialization), race conditions, and silent data loss that the tests likely do not cover. Report findings one per line as \`path:line: <severity> <problem>. <concrete failure scenario>.\` If you find nothing, say exactly "No issues found in reviewed scope." — do not manufacture a finding.
+    Once verify PASSes (status PASS), review your own diff adversarially, as if you did not write it: look specifically for logic edge cases, security issues (injection, auth bypass, secrets, unsafe deserialization), race conditions, and silent data loss that the tests likely do not cover. Report findings one per line as `path:line: <severity> <problem>. <concrete failure scenario>.` If you find nothing, say exactly "No issues found in reviewed scope." — do not manufacture a finding.
 
-    Return your final report via the required structured output: status, every verify round with its command/result/output, your review findings text, and a one-paragraph summary of what was done.`
-    }
+    Return your final report as plain text in exactly this shape, in this order, with no extra commentary before or after it:
 
-    const results = await parallel(
-      args.features.map(f => () =>
-        agent(buildPrompt(f), { label: f.name, schema: REPORT_SCHEMA, isolation: 'worktree' })
-          .then(r => ({ feature: f.name, ...r }))
-      )
-    )
+    STATUS: PASS or FAIL
 
-    return { results: results.filter(Boolean) }
+    VERIFY ROUNDS:
+    Round 1: command=<exact command> result=PASS/FAIL
+    output: <full output>
+    Round 2: (same shape, only if round 1 failed)
+    Round 3: (same shape, only if round 2 failed)
 
-After the `Workflow` tool returns, print one line per feature: name, status, verify round count, review findings summary — do not soften a FAIL into something gentler. Tell the user which git worktree/branch holds each feature's result (the Workflow tool result includes this) so they can review and merge with `superpowers:finishing-a-development-branch` one branch at a time — never auto-merge.
+    REVIEW FINDINGS:
+    <one finding per line as specified above, or "No issues found in reviewed scope.">
+
+    SUMMARY:
+    <one paragraph describing what was done>
+
+    Also state which git worktree path and branch name hold your changes.
+
+Each dispatched Agent's completion arrives later as a background task-notification, independently of the others and independently of how far Pha 1 has progressed for remaining features. The moment a notification arrives for a feature, report it to the user right away — name, status, verify round count, review findings summary, worktree/branch — do not hold it back or batch it together with other features' results, and do not soften a FAIL into something gentler. Tell the user to review and merge with `superpowers:finishing-a-development-branch` one branch at a time — never auto-merge.
 
 ## Hard rules
 
-- Never start Pha 2 while any feature in the batch still lacks an approved plan.
-- Never let Pha 2 wait for human input mid-run — if an agent reports it's blocked, that surfaces in its report, not as a live prompt.
-- Never merge branches yourself after Pha 2 — only report and hand off to the user.
+- Never dispatch a feature's Pha 2 Agent call before that specific feature's plan is approved — other features in the batch may still be earlier in Pha 1 at that moment, and that's fine.
+- Never wait for a dispatched Agent to finish before continuing Pha 1 for the next feature — the dispatch call must not block the main thread.
+- Never let a dispatched Agent wait for human input mid-run — if it reports it's blocked, that surfaces in its final report, not as a live prompt.
+- Never batch multiple features' completion reports together — report each one to the user as soon as its background notification arrives.
+- Never merge branches yourself after a feature's Pha 2 completes — only report and hand off to the user.
