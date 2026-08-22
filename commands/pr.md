@@ -2,7 +2,7 @@
 description: Generate a PR description (What changed / Why / How to test) from real git diff + commit log against a base branch, gate human approval, then optionally publish via gh pr edit or print for manual paste. 1-shot, no loop/retry, fully independent of the multi-stage requirement pipeline. Also supports --batch --target <branch> to process every git worktree sequentially and publish per-worktree via gh pr create/edit behind a single aggregate approval gate.
 ---
 
-# /pr-description
+# /pr
 
 Arguments: `$ARGUMENTS` — either:
 - OPTIONAL, a single base branch name; defaults to `main` if omitted (single-repo mode, unchanged — see Orchestration below).
