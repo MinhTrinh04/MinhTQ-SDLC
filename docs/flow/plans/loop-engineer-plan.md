@@ -34,7 +34,7 @@ description: Unattended, scheduled Jira-ticket pipeline — pulls N tickets via 
 
 # /loop-engineer
 
-Arguments: `$ARGUMENTS` — REQUIRED: `--mode <sequential|parallel> --count <N>`. Both flags are mandatory on every invocation, live or scheduled — this command never calls `AskUserQuestion`, so there is no live-prompt fallback for a missing flag. If either is missing or `<N>` is not a positive integer: say so plainly and STOP — do not guess a default, do not proceed with any ticket.
+Arguments: `$ARGUMENTS` — REQUIRED: `--mode <sequential|parallel> --count <N>`. Both flags are mandatory on every invocation, live or scheduled — this command never calls `AskUserQuestion`, so there is no live-prompt fallback for a missing or invalid flag. If either is missing, `--mode` is present but is not the exact literal string `sequential` or `parallel` (a typo like `paralel` is neither — never treat a near-match as one of the two), or `<N>` is not a positive integer: say so plainly and STOP — do not guess a default, do not fall back to either mode, do not proceed with any ticket.
 
 This command is designed to be triggered by Claude Code's native Cron/Schedule capability, configured to always pass both flags. No external orchestration tool (n8n or otherwise) is used or needed — MCP connectors (Jira/Atlassian, etc.) belong to the Claude Code environment itself and work identically regardless of what triggers a run.
 
@@ -53,8 +53,8 @@ If unauthorized: print the same setup-guide content `jira-sync.md`'s Step 0b pri
 1. Read the target repo's `CLAUDE.md` for a `## Auto-Loop Jira Query` section (same convention as `## Benchmark` in `optimize.md`, `## Shadow Database` in `migration-safe.md`) — its content is a JQL query, e.g. `project = X AND status = "Ready for Auto" ORDER BY priority DESC`.
 2. If that section is absent: say so plainly and STOP without processing any ticket. Never guess a query.
 3. Run the JQL query via the Jira/Atlassian MCP connector (issue-search capability) and take the first `<N>` (from `--count`) results, in the query's own returned order. Build the working ticket list: `[{ticketId, order}]`.
-4. Create `docs/flow/loop-runs/<date>-ledger.md` (date = today, `YYYY-MM-DD`) if it does not already exist for this run; write one line per ticket in the working list: `<ticketId>: PENDING`. This ledger is informational/resumability-only — git state (worktrees/branches/commits) is always the source of truth, never this file.
-   - If a ledger for today's date already exists (a prior invocation today was interrupted mid-run): read it first. Skip any ticket already at `READY` or `NEEDS-HUMAN` — do not reprocess it. Re-dispatch anything still at `IN-PROGRESS` or `PENDING` exactly as if newly selected.
+4. Create `docs/flow/loop-runs/<date>-ledger.md` (date = today, `YYYY-MM-DD`) if it does not already exist for this run; write one line per ticket in the working list: `<ticketId>: PENDING`. Each line's format is `<ticketId>: <STATUS>[ | worktree=<path> | branch=<name>]` — the worktree/branch fields are appended once known (Step 3 fills them in as soon as a dispatch returns them), absent until then. This ledger is informational/resumability-only — git state (worktrees/branches/commits) is always the source of truth, never this file.
+   - If a ledger for today's date already exists (a prior invocation today was interrupted mid-run): read it first. Skip any ticket already at `READY` or `NEEDS-HUMAN` — do not reprocess it. Re-dispatch anything still at `IN-PROGRESS` or `PENDING` exactly as if newly selected, but see Step 4 below for `IN-PROGRESS` tickets that already have a recorded `worktree=`/`branch=` — those resume into the existing worktree, they never get a fresh one.
 
 ### Step 2 — Pha 1: Brainstorm + Plan (always sequential, auto-approved per rule)
 
@@ -67,8 +67,8 @@ For each ticket in the working list, **in order, one at a time**:
    > "This is an unattended `/loop-engineer` run. After you reach your normal Step 7 approval gate, do NOT call `AskUserQuestion` and do NOT wait for a live response — instead, clearly state your classification (Spike/Bounded/Architectural) and whether concrete, non-empty acceptance criteria were present in the source ticket, then stop. The caller (`/loop-engineer`) applies its own auto-approval rule to that output, not a human."
 
 4. **Auto-approval rule** (replaces `flow-brainstorm`'s own live gate for this command only):
-   - Classification is **Bounded** AND acceptance criteria are present and concrete (non-empty, not a vague restatement of the title) → auto-approved. Continue to step 5.
-   - Classification is **Architectural**, OR acceptance criteria are missing/ambiguous, OR classification is **Spike** (a spike produces a recommendation, not a design `flow-plan` can plan against) → **park this ticket**: update its ledger line to `NEEDS-HUMAN: <specific reason>` (e.g. `NEEDS-HUMAN: Architectural classification`, `NEEDS-HUMAN: acceptance criteria missing`, `NEEDS-HUMAN: Spike classification`), do not proceed to `flow-plan`/execute for it, move to the next ticket.
+   - Classification is **exactly and unambiguously Bounded** (the override output states the single word "Bounded" as its classification, not a hedge like "probably Bounded" or "Bounded or possibly Architectural") AND acceptance criteria are present and concrete (non-empty, not a vague restatement of the title) → auto-approved. Continue to step 5.
+   - Classification is **Architectural**, OR acceptance criteria are missing/ambiguous, OR classification is **Spike** (a spike produces a recommendation, not a design `flow-plan` can plan against), OR the override output does not clearly commit to exactly one of the three labels (hedged, missing, or self-contradictory) → **park this ticket**: update its ledger line to `NEEDS-HUMAN: <specific reason>` (e.g. `NEEDS-HUMAN: Architectural classification`, `NEEDS-HUMAN: acceptance criteria missing`, `NEEDS-HUMAN: Spike classification`, `NEEDS-HUMAN: flow-brainstorm output did not clearly state a classification`), do not proceed to `flow-plan`/execute for it, move to the next ticket. An unclear answer is treated the same as the riskiest case (Architectural) — never treated as an implicit Bounded.
 5. Invoke the `flow-plan` skill with the approved design, appending the equivalent override instruction: do not call `AskUserQuestion` at its own Step 6 gate — its self-review (placeholder scan, requirement coverage) already ran; trust its output once produced, no second human-equivalent gate here.
 6. The moment this ticket's plan file is written, hand it to Pha 2 (below) per the run's `--mode`.
 
@@ -76,10 +76,14 @@ For each ticket in the working list, **in order, one at a time**:
 
 Every ticket's execute+verify+review run happens in its own git worktree, in both modes — never shared.
 
-- **`--mode parallel`** (mirrors `/flow-batch`'s existing Pha 2 pipeline exactly): the moment a ticket's plan is ready (Step 2.6), call the `Agent` tool for that single ticket immediately, with `isolation: "worktree"`. Do not pass a flag that disables backgrounding — the `Agent` tool backgrounds by default, so this call returns immediately and the main thread continues Step 2 for the next ticket right away, without waiting.
-- **`--mode sequential`**: dispatch the same way (`Agent` tool, `isolation: "worktree"`), but **wait for this ticket's Agent call to fully return** (verify + review done) before starting the next ticket's Step 2 (Pha 1 brainstorm). One worktree per ticket either way — sequential means one ticket fully finishes before the next one *starts*, not a shared workspace.
+**First-time dispatch vs. resume dispatch:** before dispatching, check this ticket's ledger line (Step 1.4) for a recorded `worktree=`/`branch=`.
+- **No recorded worktree (first time for this ticket):** call the `Agent` tool with `isolation: "worktree"` — it creates a fresh worktree/branch automatically. As soon as the dispatch result is known (either the immediate return in `--mode sequential`, or the background task-notification's `worktree`/`worktreeBranch` fields in `--mode parallel`), write the returned worktree path and branch name into this ticket's ledger line (`worktree=<path> | branch=<name>`) — do this even if the dispatch is still running in `--mode parallel`, as soon as the path/branch is known, not only at completion.
+- **Recorded worktree already exists (resuming an `IN-PROGRESS` ticket from an earlier interrupted run):** do NOT pass `isolation: "worktree"` — that always creates a new one. Instead, dispatch a plain `Agent` call whose prompt explicitly instructs it to `cd` into the exact recorded worktree path first, run `git log --oneline -5` and `git status --porcelain` there to see what already landed before this run was interrupted, and continue the plan from wherever it actually left off — never re-run already-committed steps, never assume nothing happened yet.
 
-The dispatched Agent's prompt (substitute `ticketId`, `slug`, `planPath`, `repoPath`, `origin_link` for this one ticket):
+- **`--mode parallel`** (mirrors `/flow-batch`'s existing Pha 2 pipeline exactly): the moment a ticket's plan is ready (Step 2.6) — or, for a resume, the moment Step 1 determines this ticket needs re-dispatching — call the `Agent` tool for that single ticket immediately (first-time or resume, per the branch above). Do not pass a flag that disables backgrounding — the `Agent` tool backgrounds by default, so this call returns immediately and the main thread continues Step 2 for the next ticket right away, without waiting.
+- **`--mode sequential`**: dispatch the same way, but **wait for this ticket's Agent call to fully return** (verify + review done) before starting the next ticket's Step 2 (Pha 1 brainstorm). One worktree per ticket either way — sequential means one ticket fully finishes before the next one *starts*, not a shared workspace.
+
+The dispatched Agent's prompt for a **first-time** dispatch (substitute `ticketId`, `slug`, `planPath`, `repoPath`, `origin_link` for this one ticket):
 
     You are executing an approved implementation plan for Jira ticket {ticketId} ("{slug}"), in repo {repoPath}. The ticket is at {origin_link}.
 
@@ -111,15 +115,27 @@ The dispatched Agent's prompt (substitute `ticketId`, `slug`, `planPath`, `repoP
 
     Also state which git worktree path and branch name hold your changes.
 
+The dispatched Agent's prompt for a **resume** dispatch (substitute `ticketId`, `slug`, `planPath`, `existingWorktreePath`, `origin_link` for this one ticket — no `isolation` parameter is passed for this call):
+
+    You are resuming an interrupted execution of the approved implementation plan for Jira ticket {ticketId} ("{slug}"). The ticket is at {origin_link}.
+
+    First, `cd` into {existingWorktreePath} — this worktree already exists from a prior, interrupted run. Do not create a new worktree. Run `git log --oneline -10` and `git status --porcelain` there to see exactly what already landed and whether anything is uncommitted.
+
+    Read the plan file at {planPath} fully. Compare its tasks against what `git log` shows already committed — resume from the first task/step that isn't done yet. Never re-run or redo a step whose commit is already present. Never assume nothing happened yet just because this is a resume.
+
+    From this point, follow the exact same execution/verify/review contract as a first-time dispatch: test-first when a test runner exists, minimal implementation, run the test, commit; after all remaining tasks are done, read this project's CLAUDE.md for test/lint/build commands (never guess), run them, ≤3 verify rounds with STOP-and-report on round 3 FAIL; on verify PASS, adversarially review the full diff (not just what this resume added) exactly as a first-time dispatch would.
+
+    Return your final report in the exact same shape as a first-time dispatch: `STATUS`, `VERIFY ROUNDS`, `REVIEW FINDINGS`, `SUMMARY`, and confirm the worktree path/branch name (should match {existingWorktreePath} and its existing branch — report explicitly if this ever fails to match, since that would indicate something went wrong with the resume).
+
 Each dispatched Agent's completion arrives later as a background task-notification (in `--mode parallel`) or as this call's direct return (in `--mode sequential`). The moment a result is known for a ticket:
-- On `STATUS: PASS`: update the ledger line for this ticket to `READY`.
-- On `STATUS: FAIL`: update the ledger line for this ticket to `FAILED: <which verify round failed>`.
+- On `STATUS: PASS`: update the ledger line for this ticket to `READY` (keep the recorded `worktree=`/`branch=` fields — the report references them).
+- On `STATUS: FAIL`: update the ledger line for this ticket to `FAILED: <which verify round failed>` (keep the recorded `worktree=`/`branch=` fields).
 
 Report each ticket's outcome to the user right away as it becomes known (same discipline as `/flow-batch`) — do not hold it back or batch it with other tickets' results, and do not soften a FAIL into something gentler.
 
 ### Step 4 — Resilience to quota/session interruptions
 
-If a dispatched Agent dies mid-run (a task-notification with `status: failed` and a quota/session-limit message), leave that ticket's ledger line at its last known state (`IN-PROGRESS`) — do not guess a result. A later invocation (manual re-run, or the next scheduled trigger) reads today's ledger (Step 1.4), skips tickets already `READY`/`NEEDS-HUMAN`, and re-dispatches anything still `IN-PROGRESS`/`PENDING` — inspecting `git log` in that ticket's worktree first to see what actually landed before re-dispatching, since the ledger is never the source of truth for git state.
+If a dispatched Agent dies mid-run (a task-notification with `status: failed` and a quota/session-limit message), leave that ticket's ledger line at its last known state (`IN-PROGRESS`, with whatever `worktree=`/`branch=` was already recorded for it) — do not guess a result. A later invocation (manual re-run, or the next scheduled trigger) reads today's ledger (Step 1.4), skips tickets already `READY`/`NEEDS-HUMAN`, and re-dispatches anything still `IN-PROGRESS`/`PENDING` using Step 3's resume-dispatch path (the recorded worktree, never a fresh one) if a `worktree=` field is present, or the first-time path if not (an `IN-PROGRESS` ticket with no recorded worktree means it died before the worktree/branch was ever reported back — safe to treat as first-time).
 
 ### Step 5 — Morning report
 
@@ -145,6 +161,9 @@ State plainly at the end: no merging happened here — review the report, then r
 - Never merge branches from this command, under any framing — report and hand off to `/pr --batch --target main` only, exactly as `/flow-batch` already does.
 - Never batch multiple tickets' completion reports together — report each one to the user as soon as its result is known.
 - Never hard-code a specific Jira/Atlassian MCP tool name — use whichever live tool fulfills the fetch/search capability described above, same rule as `jira-sync.md`.
+- Never treat a near-match `--mode` value (e.g. `paralel`, `Parallel`, `PARALLEL`) as valid — only the exact lowercase literals `sequential` or `parallel` are accepted; anything else is a plain STOP-and-report, never a guessed default.
+- Never treat a hedged, missing, or self-contradictory classification output from `flow-brainstorm` (e.g. "probably Bounded", no label stated, or a label that doesn't match one of the three defined buckets) as an implicit Bounded — park it as `NEEDS-HUMAN: flow-brainstorm output did not clearly state a classification` instead.
+- Never dispatch a fresh `isolation: "worktree"` Agent call for a ticket that already has a recorded `worktree=`/`branch=` in the ledger — reuse the existing worktree via the resume-dispatch prompt (Step 3) instead of starting over in a new one.
 ```
 
 - [ ] **Step 2: Verify the file is well-formed**
@@ -157,10 +176,10 @@ Expected: file exists, size > 0.
 Run: `bash -c 'grep -rniE "TBD|todo:|fill in|placeholder" commands/*.md skills/*/SKILL.md agents/*.md && echo FAIL && exit 1 || echo PASS'`
 Expected: `PASS`.
 
-- [ ] **Step 4: Targeted scan confirming no AskUserQuestion anywhere in this file**
+- [ ] **Step 4: Manual inspection confirming every `AskUserQuestion` mention is prohibitive, never permissive**
 
-Run: `grep -c "AskUserQuestion" commands/loop-engineer.md`
-Expected: `0` — this command must never call it, per the design amendment.
+Run: `grep -n "AskUserQuestion" commands/loop-engineer.md` and read each matched line.
+Expected: every match is phrased as "never call," "do NOT call," or "no `AskUserQuestion`" — i.e. documenting the prohibition — never a sentence instructing this command to actually invoke it (that would be a real bug; the earlier "expect 0 mentions" check was itself wrong, since the file must name the tool to prohibit it).
 
 - [ ] **Step 5: Smoke-test the missing-flags path (real, exercisable without any MCP)**
 
