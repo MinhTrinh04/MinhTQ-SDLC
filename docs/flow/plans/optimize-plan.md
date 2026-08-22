@@ -124,4 +124,4 @@ cd "d:/Github/MinhTQ-SDLC" && git add commands/optimize.md && git commit -m "fea
 
 - **Spec coverage:** README Mục 3 `/optimize` (baseline, 2-3 approaches, human pick, measure+revert) → Orchestration steps 2-9. README Mục 0.5 ("không tự động hoá việc không có tiêu chí xong rõ ràng") → Step 4's explicit override + Hard rules.
 - **Placeholder scan:** literal command content, no TBD.
-- **Type/name consistency:** `flow-brainstorm`, `flow-execute` match flow-core plan's Tasks 4 and 6 exactly. Plan-synthesis pattern (Step 7) matches `/fix-feature`'s precedent exactly (docs/flow/plans/2026-08-21-fix-feature-plan.md Task 1 Step 1, Orchestration step 3).
+- **Type/name consistency:** `flow-brainstorm`, `flow-execute` match flow-core plan's Tasks 4 and 6 exactly. Plan-synthesis pattern (Step 7) matches `/fix-feature`'s precedent exactly (docs/flow/plans/fix-feature-plan.md Task 1 Step 1, Orchestration step 3).

@@ -8,7 +8,7 @@
 
 **Tech Stack:** Claude Code global config artifacts only — markdown subagent definitions (`~/.claude/agents/*.md`), markdown skill definitions (`~/.claude/skills/*/SKILL.md`), and a markdown slash command (`~/.claude/commands/flow.md`). No application code, no package manager. "Tests" in this plan are scripted end-to-end invocations against a disposable scratch repo, since the deliverable is prompt/config behavior, not compiled code.
 
-**Spec:** [docs/flow/specs/2026-08-21-loop-engineering-flow-design.md](../specs/2026-08-21-loop-engineering-flow-design.md)
+**Spec:** [docs/flow/specs/loop-engineering-flow-design.md](../specs/loop-engineering-flow-design.md)
 
 ## Global Constraints
 

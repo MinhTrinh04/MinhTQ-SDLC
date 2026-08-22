@@ -23,7 +23,7 @@ You receive one normalized requirement block: `{source: "jira"|"file"|"text", co
 6. **Present the design.**
    - Spike: 2-3 sentences, get a nod, done (no design doc — the terminal state is a recommendation, produced by `flow-execute`'s investigation, not this skill).
    - Bounded: a few sentences to a few short paragraphs, in chat.
-   - Architectural: sectioned design, then write to `docs/flow/specs/YYYY-MM-DD-<topic>-design.md`, commit it.
+   - Architectural: sectioned design. Check whether `docs/flow/specs/<topic>-design.md` already exists for this topic (glob by topic/feature name, not date). If it exists, append this design as a new dated section at the end of that SAME file instead of creating a new one. If it doesn't exist yet, create `docs/flow/specs/<topic>-design.md` (no date in the filename). Commit either way.
 7. **STOP and ask via `AskUserQuestion`.** Never end the turn on a plain prose question waiting for free-text "ok". Present the approval gate as an explicit choice. The "Approve" option's label must name whatever the caller's actual next step is — do not hardcode "proceed to flow-plan": if the invoking command skips `flow-plan` (e.g. it synthesizes its own plan and hands off straight to `flow-execute`, as `/fix-feature`/`/optimize` do), say "Approve — proceed" or name that actual next step instead. Example for the normal `/flow` case:
    - "Approve — proceed to flow-plan" (recommended)
    - "Request changes — describe what to adjust" (free text via the tool's built-in Other option)
@@ -32,6 +32,7 @@ You receive one normalized requirement block: `{source: "jira"|"file"|"text", co
 
 ## Hard rules
 
+- Never create a new dated spec file for a topic that already has one — append a new dated section to the existing `docs/flow/specs/<topic>-design.md` instead.
 - Never invoke `flow-plan` or `flow-execute` yourself from inside this skill — the `/flow` command orchestrates the handoff after seeing approval.
 - Never treat "the requirement looks complete" as a reason to skip asking about ambiguity you actually found — if you found it, ask it.
 - If mid-brainstorm you discover the work is bigger than the initial classification (hidden complexity), say so and re-classify — never downgrade, only upgrade.
