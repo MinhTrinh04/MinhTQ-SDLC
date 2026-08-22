@@ -27,7 +27,7 @@ If a feature's brainstorm reveals it should be dropped or split, say so and adju
 
 As soon as a feature's plan is approved in Pha 1 (step 5 above), call the `Agent` tool for that single feature — do not batch this call, do not wait for other features. Pass `isolation: "worktree"`. Do not pass `run_in_background: false` — the `Agent` tool runs subagents in the background by default, so this call returns immediately and the main thread proceeds straight to the next feature's Pha 1 loop.
 
-The Agent's prompt (fill in `name`, `planPath`, `repoPath` for this one feature):
+The Agent's prompt (substitute `name`, `planPath`, `repoPath` for this one feature):
 
     You are executing an approved implementation plan for feature "{name}", in repo {repoPath}.
 
