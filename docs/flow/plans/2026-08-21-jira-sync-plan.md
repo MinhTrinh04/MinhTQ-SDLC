@@ -37,7 +37,7 @@ No other input form is supported — this command does not use the `--jira`/`--f
 
 Before doing anything else, confirm the Jira/Atlassian MCP connector is authorized on this machine. There is no separate "status check" tool documented anywhere in this repo — the only established way to detect this is to attempt the required capability for the requested mode and observe whether it succeeds or fails on authorization:
 - `--read`: attempt to fetch the issue by ID.
-- `--update`: attempt to add a comment (and, if requested, transition status).
+- `--update`: attempt to fetch the issue by ID (the same read-only capability as `--read` mode) — never probe by attempting to post a comment, since the real comment text hasn't been composed yet at this point (it's composed later, in `--update` mode's own Step 3) and probing with made-up content would violate the "never fabricate a comment" rule. A successful fetch here both confirms authorization and confirms the ticket exists before anything is composed or posted.
 
 If the attempt fails because the connector is not authorized/connected (rather than, e.g., a bad ticket ID on an authorized connector): state plainly that the Jira/Atlassian MCP needs to be authorized via `/mcp` or claude.ai connector settings, and STOP. Never guess ticket content. Never fabricate a description, acceptance criteria, checklist, comment confirmation, or status change. Do not proceed to any step below until a real, successful MCP response has been observed.
 
@@ -45,10 +45,11 @@ Note on tool names: the exact Jira/Atlassian MCP tool names (e.g. `mcp__<connect
 
 ## `--read <ticket-ID>` mode
 
-1. Fetch the ticket by ID via the Jira/Atlassian MCP (capability: fetch issue, returning at minimum title, description, and acceptance criteria).
-2. If the ticket has no acceptance criteria field/content: say so plainly and STOP — do not invent acceptance criteria from the description alone.
-3. From the acceptance criteria only, generate a checklist of concrete work items — one checklist item per distinct, testable condition in the AC. Do not add scope not implied by the AC.
-4. Present the ticket's title, description, acceptance criteria (verbatim from the fetch), and the generated checklist to the user as the command's output. This command does not itself invoke `flow-brainstorm`/`flow-plan`/`flow-execute` — the checklist is the deliverable; a human decides what to do with it next (e.g. feeding it into `/flow` as bare text).
+1. Require `<ticket-ID>` to be present. If it's missing, say so plainly and STOP — do not guess a ticket ID.
+2. Fetch the ticket by ID via the Jira/Atlassian MCP (capability: fetch issue, returning at minimum title, description, and acceptance criteria).
+3. If the ticket has no acceptance criteria field/content: say so plainly and STOP — do not invent acceptance criteria from the description alone.
+4. From the acceptance criteria only, generate a checklist of concrete work items — one checklist item per distinct, testable condition in the AC. Do not add scope not implied by the AC.
+5. Present the ticket's title, description, acceptance criteria (verbatim from the fetch), and the generated checklist to the user as the command's output. This command does not itself invoke any stage of the `/flow` pipeline — the checklist is the deliverable; a human decides what to do with it next (e.g. feeding it into `/flow` as bare text).
 
 ## `--update <ticket-ID> --pr <url>` mode
 
