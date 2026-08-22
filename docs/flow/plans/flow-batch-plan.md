@@ -8,7 +8,7 @@
 
 **Tech Stack:** Claude Code global command (markdown, `~/.claude/commands/`, junction-linked from this repo per `README.md` Mục 1.5) + the `Workflow` tool's inline-JS scripting for Pha 2 parallel fan-out.
 
-**Spec:** [docs/flow/specs/2026-08-21-loop-engineering-flow-design.md](../specs/2026-08-21-loop-engineering-flow-design.md), Mục 7.
+**Spec:** [docs/flow/specs/loop-engineering-flow-design.md](../specs/loop-engineering-flow-design.md), Mục 7.
 
 ## Global Constraints
 
@@ -190,7 +190,7 @@ cd "d:/Github/MinhTQ-SDLC" && git add commands/flow-batch.md && git commit -m "f
 
 **Approved design:** drop the `Workflow` tool entirely from `/flow-batch`; dispatch one `Agent` call per feature right after that feature's plan gate passes; main thread continues Pha 1 for the next feature without waiting; report each feature's result as its background notification arrives, not batched at the end.
 
-**Spec:** [docs/flow/specs/2026-08-21-loop-engineering-flow-design.md](../specs/2026-08-21-loop-engineering-flow-design.md), Mục 7 (this plan updates 7.3 and 7.5).
+**Spec:** [docs/flow/specs/loop-engineering-flow-design.md](../specs/loop-engineering-flow-design.md), Mục 7 (this plan updates 7.3 and 7.5).
 
 ---
 
@@ -311,7 +311,7 @@ cd "d:/Github/MinhTQ-SDLC" && git add commands/flow-batch.md
 ### Task 3: Update spec Mục 7.3 and 7.5 (added 2026-08-21)
 
 **Files:**
-- Modify: `docs/flow/specs/2026-08-21-loop-engineering-flow-design.md`
+- Modify: `docs/flow/specs/loop-engineering-flow-design.md`
 
 **Interfaces:** prose-only; must stay consistent with Task 1's new command behavior.
 
@@ -387,7 +387,7 @@ New:
 - [ ] **Step 3: Commit both files together**
 
 ```bash
-cd "d:/Github/MinhTQ-SDLC" && git add commands/flow-batch.md docs/flow/specs/2026-08-21-loop-engineering-flow-design.md && git commit -m "refactor: /flow-batch Pha 2 dispatches per-feature via Agent tool immediately, no more Workflow barrier"
+cd "d:/Github/MinhTQ-SDLC" && git add commands/flow-batch.md docs/flow/specs/loop-engineering-flow-design.md && git commit -m "refactor: /flow-batch Pha 2 dispatches per-feature via Agent tool immediately, no more Workflow barrier"
 ```
 
 ---
