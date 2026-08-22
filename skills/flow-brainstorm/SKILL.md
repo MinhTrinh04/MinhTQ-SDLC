@@ -24,11 +24,11 @@ You receive one normalized requirement block: `{source: "jira"|"file"|"text", co
    - Spike: 2-3 sentences, get a nod, done (no design doc — the terminal state is a recommendation, produced by `flow-execute`'s investigation, not this skill).
    - Bounded: a few sentences to a few short paragraphs, in chat.
    - Architectural: sectioned design, then write to `docs/flow/specs/YYYY-MM-DD-<topic>-design.md`, commit it.
-7. **STOP and ask via `AskUserQuestion`.** Never end the turn on a plain prose question waiting for free-text "ok". Present the approval gate as an explicit choice, e.g.:
+7. **STOP and ask via `AskUserQuestion`.** Never end the turn on a plain prose question waiting for free-text "ok". Present the approval gate as an explicit choice. The "Approve" option's label must name whatever the caller's actual next step is — do not hardcode "proceed to flow-plan": if the invoking command skips `flow-plan` (e.g. it synthesizes its own plan and hands off straight to `flow-execute`, as `/fix-feature`/`/optimize` do), say "Approve — proceed" or name that actual next step instead. Example for the normal `/flow` case:
    - "Approve — proceed to flow-plan" (recommended)
    - "Request changes — describe what to adjust" (free text via the tool's built-in Other option)
    - "Reject — stop here"
-   Do not proceed to `flow-plan` until "Approve" is selected. This gate is never skipped, regardless of how small the change looks.
+   Do not proceed until "Approve" is selected. This gate is never skipped, regardless of how small the change looks.
 
 ## Hard rules
 
