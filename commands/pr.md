@@ -21,6 +21,13 @@ This command does **not** use the `--jira`/`--file`/bare-text input adapter used
 5. Only if approved: check whether the `gh` CLI is available (`gh --version`). If available, check whether an open PR exists for the current branch targeting `<base>` (`gh pr view --json url`; `gh pr view` with no args uses the current branch's context by default when run inside the repo — verify this resolves the correct branch, not an assumed one).
    - If `gh` available AND an open PR exists: write the description to a temp file **using the Write tool** (never by shell-interpolating the generated text into an `echo`/heredoc/redirect command line — the description contains attacker-influenceable content from commit messages and diff text, and building a shell command by string-concatenating it in is a command-injection risk), then run `gh pr edit --body-file <tmpfile>` — **use `--body-file`, not inline `--body <description>`**, since the description is multi-line and inline argument passing is unreliable across shells/quoting (especially on Windows/PowerShell). Report the PR URL back to the user, then delete the temp file.
    - If `gh` is unavailable, or no open PR exists yet: this is an expected fallback, not an error — print the final description clearly for the user to paste manually, and say plainly why (no `gh` / no open PR yet).
+6. Only after Step 5 completes (published or fallback-printed): gate a real merge via a **separate** `AskUserQuestion`, distinct from Step 4's description-approval gate — "Merge `<current-branch>` vào `<base>` bây giờ?" with exactly these two options: "Approve — merge now", "Skip — leave for later". Never merge on the strength of Step 4's approval alone, and never merge without this explicit gate.
+   - "Skip — leave for later": stop here — report that `<current-branch>` (and its PR, if one exists) remains for a human to merge later. Do nothing further.
+   - "Approve — merge now": first run `git status --porcelain` in the current worktree. If it prints anything, the worktree is dirty — STOP and report this plainly, do not merge.
+     - If `gh` is available (`gh --version`) and an open PR exists for this branch (reuse Step 5's `gh pr view` check): run `gh pr merge --merge` (a plain merge commit — never `--squash`/`--rebase` by default).
+     - Otherwise (no `gh`, or no open PR): merge locally — `git checkout <base>`, `git merge <current-branch> --no-ff`, then `git checkout <current-branch>` to return to the original branch afterward.
+     - If a remote `origin` is configured (`git remote get-url origin` succeeds), ask one more, **separate** `AskUserQuestion` — "Push `<base>` to origin now?" with options "Approve — push" / "Skip — leave unpushed" — before running `git push origin <base>`. Never push without this explicit second ask; approving the merge never implies approving the push.
+     - Report the merge result plainly: fast-forward, or the merge commit SHA.
 
 ## Batch Orchestration (`--batch --target <branch>`)
 
@@ -51,11 +58,24 @@ Batch mode does not replace single-repo mode above — it is a separate invocati
    - If `gh` is unavailable: same expected fallback as single-repo mode — print this worktree's description plainly for manual use and say why (no `gh`). This is not an error.
    - Report each PR's URL (or fallback notice) back to the user as soon as it completes; delete each temp file right after use.
 
-Never run `git merge <target>` for real as a final merge into `<target>` anywhere in this mode, and never run `gh pr merge` — batch mode only creates/updates PR bodies; a human merges on GitHub (README.md line 12's "duyệt trước khi merge/deploy/production" principle).
+Steps 1-5 above never run `git merge <target>` for real as a final merge into `<target>`, and never run `gh pr merge` — those steps only create/update PR bodies. Real merging into `<target>`, if desired, happens only in Step 6 below, behind its own explicit aggregate approval gate — never as a side effect of publishing.
+
+6. Only after Step 5 completes for every approved worktree (published or fallback-printed): from the **main worktree** (repo root) only — never from inside any feature worktree's directory — present **one aggregate** `AskUserQuestion` gate for the whole batch: "Merge thật N branch (đã publish) vào `<target>` bây giờ?" (N = count of worktrees that reached READY-and-published in Step 5), with exactly these three options:
+   - "Approve — merge all now": proceed to the sequential merge loop below.
+   - "Skip — leave PRs open": stop here — report which branches still have open PRs, unchanged, for a human to merge later. Do nothing further.
+   - "Review each individually": for each READY-and-published worktree, in turn, run single-repo mode's own Step 6 gate above **verbatim** (its "Approve — merge now" / "Skip — leave for later" options and all its checks), once per branch, substituting `<target>` for `<base>`. Skip only its local-fallback push sub-ask here — batch mode's push question is asked once for the whole batch in point 7 below, not per branch.
+
+   On "Approve — merge all now", process the READY-and-published worktrees **sequentially, one at a time, never in parallel** (same discipline as Step 2), from the main worktree with `<target>` checked out:
+   a. For each branch, attempt `git merge <branch> --no-ff` into `<target>`.
+   b. **Clean fast-forward/auto-merge (expected case):** each worktree already merged `<target>` into itself during Step 2's conflict-check pass, so this should apply cleanly — commit, move to the next branch.
+   c. **Not a clean fast-forward** (a prior branch earlier in this same loop already advanced `<target>` past what this branch saw during its own Step 2 merge): in that worktree's own directory, merge `<target>`'s new HEAD back into this worktree's branch first, then dispatch the `Agent` tool to resolve any conflict and the `verifier` subagent to re-verify — reusing the **exact** blocking dispatch-and-wait pattern from Batch Orchestration Step 2c (call once, wait for the result before continuing; Agent-cannot-resolve → `git merge --abort`; verifier FAIL → `git reset --hard ORIG_HEAD`) — then retry `git merge <branch> --no-ff` into `<target>`.
+   d. If a branch's merge into `<target>` still fails after one resync attempt: mark it **FAILED** for this step (its PR is left open, untouched), report why, and continue with the remaining branches — one branch's failure never blocks or aborts the others.
+   e. After all branches are processed, report the final result: which branches merged into `<target>` (each with its merge commit SHA), and which remain as open PRs (FAILED-to-merge or Skipped), plainly.
+7. If any branch merged successfully in point 6 and a remote `origin` is configured (`git remote get-url origin` succeeds, checked once from the main worktree), ask **one more, separate** `AskUserQuestion` for the whole batch — "Push `<target>` to origin now?" with options "Approve — push" / "Skip — leave unpushed" — before running `git push origin <target>`. Never push automatically; this is a single batch-wide ask, not one per branch.
 
 ## Hard rules
 
-- Never auto-merge, never push, never create commits — read-only on git history, at most updates a PR's body text.
+- Never merge (`git merge`/`gh pr merge`) or push, except behind Step 6's dedicated `AskUserQuestion` gate(s) — outside an explicit Step 6 approval, this command remains read-only on git history and at most updates a PR's body text.
 - Never fabricate diff/commit content if the git commands fail — stop and report the actual error.
 - Never publish (via `gh pr edit`) without going through the `AskUserQuestion` approval gate first, and never treat an "Edit" response as approval — only "Approve as-is" (or a fresh approval after edits) authorizes publishing.
 - Never treat a missing `gh` CLI or missing open PR as an error condition — both are expected, documented fallback paths that end in printing the description for manual use.
@@ -63,14 +83,22 @@ Never run `git merge <target>` for real as a final merge into `<target>` anywher
 - Never use inline `gh pr edit --body <description>` for a multi-line description — always `--body-file` with a temp file.
 - Never interpolate `<base>` into a shell command before it has passed the ref-format validation in Orchestration Step 1.
 - Never write the generated description to the temp file via shell string-interpolation — use the Write tool.
+- Never merge without going through Step 6's dedicated `AskUserQuestion` gate — separate from Step 4's description-approval gate; Step 4's approval never implies merge approval.
+- Never merge over a dirty worktree — check `git status --porcelain` immediately before merging in single-repo mode's Step 6; if dirty, STOP and report, do not merge.
+- Never push without a second, separate, explicit `AskUserQuestion` approval distinct from the merge approval — approving a merge never implies approving a push.
+- Never use `gh pr merge --squash` or `--rebase` by default — always `--merge` (a plain merge commit) unless a human explicitly requests otherwise.
 - (Batch mode) Never process worktrees in parallel — one at a time, sequentially, so one worktree's conflict resolution and verify never race another's.
 - (Batch mode) Never skip dispatching the full `verifier` subagent after an Agent-resolved conflict — a resolved conflict is not safe to generate a PR from until verify PASSes.
 - (Batch mode) Never let one worktree's FAILED status block, skip, or abort processing of the remaining worktrees.
 - (Batch mode) Never present more than one `AskUserQuestion` gate for the batch as a whole before publishing — "Review each individually" is the only path that reintroduces per-worktree gates, and those reuse the existing single-repo gate verbatim rather than inventing a new one.
-- (Batch mode) Never run `git merge <target>` or `gh pr merge` as a real final merge in any worktree — this mode only creates/updates PR bodies, never merges.
+- (Batch mode) Never run `git merge <target>` or `gh pr merge` as a real final merge except inside batch Step 6, and only after its aggregate `AskUserQuestion` approval — Steps 1-5 only create/update PR bodies, never merge.
 - (Batch mode) Reuse, never reimplement: the `<target>` ref-format validation (identical rule to `<base>`), the Write-tool temp-file rule, the no-gh/no-open-PR fallback, and the three-section diff/template generation logic — all defined once above in single-repo mode.
 - (Batch mode) Never use `git merge --abort` after the merge has already produced a commit — it fails silently ("no merge to abort") and leaves the bad commit in place. Once committed (conflict-resolved or clean auto-merge), use `git reset --hard ORIG_HEAD` to actually undo it. `git merge --abort` is only valid for an in-progress, uncommitted conflict.
 - (Batch mode) Never skip `verifier` on a clean (no-conflict) auto-merge — a clean merge can still break the build; both the conflict path and the clean-merge path are verify-gated before READY.
 - (Batch mode) Never attempt a merge on a dirty or detached-HEAD worktree — check `git status --porcelain` and `git symbolic-ref -q HEAD` first; mark FAILED and skip instead.
 - (Batch mode) Never pass the `gh pr create` title as raw, unsanitized text — strip anything outside a safe printable set before it goes on the command line, same injection concern as the body text.
 - (Batch mode) Never exclude the main worktree from `git worktree list` by path-string comparison — use its fixed first-row position instead.
+- (Batch mode) Never run Step 6's aggregate merge gate or the merge loop itself from inside a feature worktree — always from the main worktree (repo root).
+- (Batch mode) Never present more than one aggregate `AskUserQuestion` merge-gate for the whole batch, except when "Review each individually" is chosen, which reuses single-repo mode's own per-branch Step 6 gate verbatim, once per branch — same pattern already established for the publish-approval gate in Step 4.
+- (Batch mode) Never push automatically after a batch merge — ask via one separate, batch-wide `AskUserQuestion` (Step 7) before `git push origin <target>`.
+- (Batch mode) Reuse, never reimplement, the conflict+Agent+verifier dispatch pattern from Batch Orchestration Step 2c when resyncing a branch whose merge into `<target>` isn't a clean fast-forward.
