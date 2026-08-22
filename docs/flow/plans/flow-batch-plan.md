@@ -395,7 +395,7 @@ cd "d:/Github/MinhTQ-SDLC" && git add commands/flow-batch.md docs/flow/specs/202
 ### Task 4: Mark the superseded historical plan (traceability only) (added 2026-08-21)
 
 **Files:**
-- Modify: `docs/flow/plans/2026-08-21-flow-batch-plan.md`
+- Modify: `docs/flow/plans/flow-batch-plan.md` (historically the standalone file `2026-08-21-flow-batch-plan.md`; now merged into this file as Task 1 above)
 
 **Interfaces:** none — this is a documentation-only addition, does not change any behavior.
 
@@ -406,7 +406,7 @@ Insert immediately after the `# Flow Batch Implementation Plan` heading:
 ```markdown
 > **Superseded (2026-08-21):** this plan's Pha 2 design (Workflow.parallel() barrier) was
 > replaced by an immediate per-feature Agent-tool dispatch model. See
-> [2026-08-21-flow-batch-pipeline-redesign-plan.md](2026-08-21-flow-batch-pipeline-redesign-plan.md)
+> [flow-batch-plan.md](flow-batch-plan.md) (this same file's Redesign section, formerly `2026-08-21-flow-batch-pipeline-redesign-plan.md`)
 > and spec Mục 7.3/7.5 for the current design. This file stays as the historical record of what
 > was originally built (commit `13885b2`) — do not edit its body to match the new design.
 ```
@@ -414,7 +414,7 @@ Insert immediately after the `# Flow Batch Implementation Plan` heading:
 - [ ] **Step 2: Commit**
 
 ```bash
-cd "d:/Github/MinhTQ-SDLC" && git add docs/flow/plans/2026-08-21-flow-batch-plan.md && git commit -m "docs: mark original flow-batch plan as superseded by pipeline redesign"
+cd "d:/Github/MinhTQ-SDLC" && git add docs/flow/plans/flow-batch-plan.md && git commit -m "docs: mark original flow-batch plan as superseded by pipeline redesign"
 ```
 
 ---
