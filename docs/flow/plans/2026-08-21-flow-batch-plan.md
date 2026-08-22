@@ -1,5 +1,11 @@
 # Flow Batch Implementation Plan
 
+> **Superseded (2026-08-21):** this plan's Pha 2 design (Workflow.parallel() barrier) was
+> replaced by an immediate per-feature Agent-tool dispatch model. See
+> [2026-08-21-flow-batch-pipeline-redesign-plan.md](2026-08-21-flow-batch-pipeline-redesign-plan.md)
+> and spec Mục 7.3/7.5 for the current design. This file stays as the historical record of what
+> was originally built (commit `13885b2`) — do not edit its body to match the new design.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build `/flow-batch` — one command that runs N features through `flow-brainstorm`+`flow-plan` sequentially (human-gated), then fans `flow-execute`+verify+review out in parallel, one isolated git worktree per feature, via the Workflow tool.
