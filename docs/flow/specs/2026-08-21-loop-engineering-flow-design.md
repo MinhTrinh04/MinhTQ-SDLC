@@ -184,18 +184,27 @@ Làm lần lượt trong chat chính (không song song — người là nút th�
 nguyên tắc "con người giữ quyền quyết định cuối" ở README mục 0.4). Kết thúc pha 1: N plan file
 đã duyệt, mỗi file ứng với 1 feature.
 
-### 7.3 Pha 2 — Execute (song song, tự động, cách ly)
+### 7.3 Pha 2 — Execute (dispatch ngay khi duyệt xong, tự động, cách ly, chạy nền)
 
-- Mỗi feature được cấp 1 git worktree + branch riêng (tránh N feature đụng file nhau khi
-  sửa chung 1 working tree).
-- Dùng Workflow tool: `parallel()` N lời gọi `agent()`, mỗi agent chạy trọn
-  `flow-execute` + retry loop với `verifier` (tối đa 3 vòng, đúng Mục 1) + `reviewer` bắt buộc,
-  trên đúng plan đã duyệt của feature đó, `isolation: 'worktree'`.
-- Không giới hạn concurrency cứng — để Workflow tool tự cap theo `min(16, CPU-2)`, feature thừa
-  tự xếp hàng chờ slot trống. Phù hợp quy mô 3-5 feature nêu ra ban đầu; nếu batch lớn hơn nhiều,
-  Workflow tự nhiên giãn thời gian chứ không tràn tài nguyên.
+- Không chờ hết cả batch duyệt xong rồi mới bắt đầu. Ngay khi 1 feature duyệt xong plan (kết
+  thúc vòng Pha 1 của riêng feature đó), dispatch feature đó ngay lập tức bằng `Agent` tool —
+  main thread không chờ agent này chạy xong mà tiếp tục Pha 1 cho feature kế tiếp trong danh
+  sách batch.
+- Mỗi feature được cấp 1 git worktree + branch riêng qua `isolation: "worktree"` (tham số
+  `Agent` tool hỗ trợ trực tiếp) — tránh N feature đụng file nhau khi sửa chung 1 working tree.
+- Agent chạy nền theo mặc định của `Agent` tool (không cần truyền cờ bật nền — chỉ cần không
+  truyền cờ tắt nền) — main thread rảnh tay ngay sau lời gọi dispatch.
+- Prompt của mỗi agent là bản gộp hướng dẫn của `flow-execute` + retry loop với `verifier`
+  (tối đa 3 vòng, đúng Mục 1) + `reviewer` bắt buộc, trên đúng plan đã duyệt của feature đó.
+  Agent tự thực hiện cả 3 vai trò trong 1 lời gọi (không có `schema` output — báo cáo cuối là
+  plain text theo đúng khuôn: status PASS/FAIL, từng vòng verify với command/result/output,
+  review findings, summary).
+- Không giới hạn concurrency cứng — mỗi feature dispatch độc lập ngay khi sẵn sàng, không có
+  điểm chờ hàng loạt (đây khác biệt cốt lõi so với mô hình `parallel()`/barrier cũ).
 - Không dừng chờ duyệt giữa chừng trong pha này (đã duyệt xong ở Pha 1, đúng nguyên tắc chỉ
   duyệt ở 2 điểm design/plan).
+- Kết quả mỗi feature về sau dưới dạng background task-notification, đến lúc nào báo lúc đó cho
+  người dùng — không gom lại chờ hết cả batch xong mới báo cáo tổng hợp một lần.
 
 ### 7.4 Output
 
@@ -205,8 +214,12 @@ từng cái, không tự động merge hàng loạt).
 
 ### 7.5 Ràng buộc cần biết
 
-- Gọi Workflow tool thật sự (không chỉ thiết kế) cần người dùng opt-in rõ bằng lời ở lượt gọi đó
-  (từ khoá "ultracode", hoặc yêu cầu trực tiếp "dùng workflow/multi-agent") — đây là hành vi
-  runtime của harness, không phải giới hạn thiết kế, nhưng cần nhớ khi thực thi `/flow-batch`.
+- Pha 2 dùng thẳng `Agent` tool (không dùng `Workflow` tool nữa kể từ bản thiết kế lại này) —
+  ràng buộc opt-in bằng lời trước đây cho `Workflow` tool (từ khoá "ultracode" hoặc yêu cầu
+  trực tiếp "dùng workflow/multi-agent") **không còn áp dụng** cho `/flow-batch`, vì command
+  không còn gọi `Workflow` ở bất kỳ đâu.
 - `isolation: 'worktree'` tốn thời gian setup + disk mỗi agent — hợp lý cho batch vài feature,
   không nên dùng cho batch hàng chục feature nhỏ lẻ.
+- Vì mỗi feature dispatch độc lập ngay khi duyệt xong (không có điểm barrier chờ cả batch), báo
+  cáo hoàn thành của các feature có thể đến không theo thứ tự — người dùng cần đọc từng thông
+  báo nền riêng lẻ thay vì đợi một báo cáo tổng hợp cuối cùng duy nhất.
