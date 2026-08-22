@@ -1,6 +1,6 @@
 # Scaffold Command Implementation Plan
 
-**Goal:** `commands/scaffold.md` — scaffold BE endpoint + FE service call + matching types from an already-approved spec/API description, skipping `flow-brainstorm` (plan → execute → verify only), per README Mục 3 and the overlap table in `docs/flow/specs/2026-08-21-loop-engineering-flow-design.md` Mục 3.
+**Goal:** `commands/scaffold.md` — scaffold BE endpoint + FE service call + matching types from an already-approved spec/API description, skipping `flow-brainstorm` (plan → execute → verify only), per README Mục 3 and the overlap table in `docs/flow/specs/loop-engineering-flow-design.md` Mục 3.
 
 **Approved design:** same input adapter as `/flow`; input IS the approved design (no brainstorm Q&A); one approval gate (after `flow-plan`); `flow-execute` implements and verifies via `verifier` (build pass + integration test call if one exists).
 
