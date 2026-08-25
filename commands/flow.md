@@ -11,19 +11,33 @@ Arguments: `$ARGUMENTS` — one of:
   - `.doc` / `.docx`: these cannot be read directly. Tell the user to convert to `.md` or `.pdf` first (or, if `pandoc` is available on the machine, offer to convert it), then STOP — do not attempt to parse it as text.
 - Bare text: use it verbatim as the requirement.
 
+Optionally, combine with a trailing `--auto-approve` flag (e.g. `/flow --jira ABC-1 --auto-approve`). See "Auto-approve mode" below.
+
 No other input form is supported — do not guess the source from the argument's shape.
 
 ## Orchestration
 
-1. Parse `$ARGUMENTS` for exactly one of the three forms above. Build the normalized requirement block: `{source, content, origin_link}`.
-2. Invoke the `flow-brainstorm` skill with that block.
-3. **Wait for explicit human approval** of the design — `flow-brainstorm` itself asks this via `AskUserQuestion` with concrete options (Approve/Request changes/Reject), never a bare prose question. Do not proceed on an ambiguous or implied yes.
-4. Invoke the `flow-plan` skill with the approved design.
-5. **Wait for explicit human approval** of the plan — `flow-plan` itself asks this via `AskUserQuestion` the same way.
-6. Invoke the `flow-execute` skill with the approved plan's file path.
-7. Print `flow-execute`'s final report verbatim to the user — do not summarize away a FAIL into something softer.
+1. Parse `$ARGUMENTS` for exactly one of the three input forms above, plus the optional `--auto-approve` flag. Build the normalized requirement block: `{source, content, origin_link}`.
+2. Invoke the `flow-brainstorm` skill with that block. If `--auto-approve` was passed, also pass `auto_approve: true`.
+3. **If `--auto-approve` was NOT passed:** wait for explicit human approval of the design — `flow-brainstorm` itself asks this via `AskUserQuestion` with concrete options (Approve/Request changes/Reject), never a bare prose question. Do not proceed on an ambiguous or implied yes.
+   **If `--auto-approve` was passed:** `flow-brainstorm` commits the spec itself (or, for Bounded/Spike, has no file to commit) and returns — no live wait.
+4. Invoke the `flow-plan` skill with the approved design. If `--auto-approve` was passed, also pass `auto_approve: true`.
+5. **If `--auto-approve` was NOT passed:** wait for explicit human approval of the plan the same way. **If `--auto-approve` was passed:** `flow-plan` commits the plan itself and returns — no live wait.
+6. Execute:
+   - **Without `--auto-approve`:** invoke the `flow-execute` skill directly with the approved plan's file path, inline in this session (unchanged from prior behavior).
+   - **With `--auto-approve`:** dispatch execution via the `Agent` tool with `isolation: "worktree"`, backgrounded by default (same prompt shape as `/flow-batch`'s Pha 2 dispatch, for this one feature/ticket). Report the worktree path and branch name immediately, then continue — do not block this session waiting for it.
+7. Print the final report verbatim to the user — `flow-execute`'s direct return (non-auto-approve path) or the dispatched Agent's report when its background task-notification arrives (auto-approve path). Do not summarize away a FAIL into something softer.
+
+## Auto-approve mode (`--auto-approve`)
+
+- Removes both approval gates (design, plan) — `flow-brainstorm`/`flow-plan` write and commit their files unattended instead of stopping for a human click.
+- Never suppresses `flow-brainstorm`'s Step 4 genuine clarifying questions or `flow-plan`'s Step 5 self-review — those still run; only the final approve/reject stop is skipped.
+- Moves execution off the main thread into an isolated git worktree (mirrors `/flow-batch`'s Pha 2), instead of running inline — so a run started with `--auto-approve` never blocks the chat waiting on `flow-execute`.
+- Never skips `flow-execute`'s own verify (≤3 retry rounds) or mandatory `reviewer` — those are unchanged; `--auto-approve` only removes the two human gates before execution starts.
+- Never merges anything — the dispatched Agent only produces a review-ready branch, exactly like `/flow-batch`; merging still goes through `/pr` and its own gate.
 
 ## Hard rules
 
-- Never skip an approval wait because the change "looks small."
+- Never skip an approval wait because the change "looks small" — unless `--auto-approve` was explicitly passed.
 - Never invent a Jira ID or file content if the fetch/read fails — stop and report the actual error.
+- Never let `--auto-approve` bypass `flow-execute`'s verify/review loop or the eventual `/pr` merge gate — it only removes the two upstream approval stops.
