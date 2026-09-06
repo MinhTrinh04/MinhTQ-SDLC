@@ -11,8 +11,8 @@ The approved plan file path from `flow-plan`.
 
 ## Process
 
-1. Read the plan file fully before starting.
-2. Execute tasks in order. For each task: write the failing test first if a test runner exists in the project, run it to confirm it fails, implement the minimal change, run the test to confirm it passes, commit — exactly as the plan's steps specify. Do not skip steps, do not add steps not in the plan.
+1. Read the plan file fully before starting. Do not print or re-quote the plan's content into chat — it was already presented (or auto-approved) at the `flow-plan` gate; reading it here is silent, internal context-gathering, not something to narrate back.
+2. Execute tasks in order. For each task: write the failing test first if a test runner exists in the project, run it to confirm it fails, implement the minimal change, run the test to confirm it passes, commit — exactly as the plan's steps specify. Do not skip steps, do not add steps not in the plan. Report progress in chat as short one-line-per-task pings ("Task 3: <title> — done"), not a restatement of that task's Files/Interfaces/steps from the plan doc.
 3. If you discover the plan is missing something required to finish a task, STOP and report it to the human — do not silently invent scope. This is the one case where you pause mid-execution.
 4. After all tasks are done, dispatch the `verifier` subagent (Task 2) with the full diff/changed-file list.
    - PASS → continue to step 5.
@@ -26,3 +26,4 @@ The approved plan file path from `flow-plan`.
 - Never touch files outside what the plan's Files sections list.
 - Never mark something "done" based on your own read of the code — only `verifier`'s PASS counts.
 - Never call `reviewer` before `verifier` reports PASS — order matters, a review of broken code wastes the reviewer's time.
+- Never print the plan file's content (or a task's Files/Interfaces/steps block) into chat during execution — the plan was already shown at its own gate; chat during execution gets short progress pings only.
