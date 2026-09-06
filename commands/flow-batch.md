@@ -44,21 +44,17 @@ The Agent's prompt (substitute `name`, `planPath`, `repoPath` for this one featu
 
     Once verify PASSes (status PASS), review your own diff adversarially, as if you did not write it: look specifically for logic edge cases, security issues (injection, auth bypass, secrets, unsafe deserialization), race conditions, and silent data loss that the tests likely do not cover. Report findings one per line as `path:line: <severity> <problem>. <concrete failure scenario>.` If you find nothing, say exactly "No issues found in reviewed scope." — do not manufacture a finding.
 
-    Return your final report as plain text in exactly this shape, in this order, with no extra commentary before or after it:
+    Return your final report as plain text in exactly this shape, in this order, with no extra commentary before or after it. This is a condensed report for chat — the full command output already lives in your own tool-call history/the worktree, never re-paste it here:
 
     STATUS: PASS or FAIL
 
-    VERIFY ROUNDS:
-    Round 1: command=<exact command> result=PASS/FAIL
-    output: <full output>
-    Round 2: (same shape, only if round 1 failed)
-    Round 3: (same shape, only if round 2 failed)
+    VERIFY: <N> round(s), each as one line: "Round K: command=<exact command> result=PASS/FAIL" — no output body on a PASS line. On the FIRST round that FAILs, add one line directly under it with just the one-line error message/failing assertion (not the full stdout dump). If the final round is FAIL (hard stop at round 3), that round's line also gets the exact failing command and its full output in full — this is the one case where full detail is warranted, since there's no further fix to summarize.
 
     REVIEW FINDINGS:
-    <one finding per line as specified above, or "No issues found in reviewed scope.">
+    <one finding per line as specified above, or "No issues found in reviewed scope."> — never trimmed, never softened.
 
     SUMMARY:
-    <one paragraph describing what was done>
+    <2-4 sentences: what was implemented, any real deviation from the plan disclosed inline, nothing else — not a walkthrough of every file touched>
 
     Also state which git worktree path and branch name hold your changes.
 
@@ -79,3 +75,4 @@ Each dispatched Agent's completion arrives later as a background task-notificati
 - Never batch multiple features' completion reports together — report each one to the user as soon as its background notification arrives.
 - Never merge branches yourself after a feature's Pha 2 completes — only report and hand off to the user.
 - Never let `--auto-approve` bypass `flow-execute`'s verify/review loop inside Pha 2, or the eventual `/pr` merge gate — it only removes the two Pha 1 approval stops.
+- Never let the condensed report format drop or soften a FAIL, a review finding, or a real plan deviation — condensing only removes redundant full-success-output dumps, never substance.
