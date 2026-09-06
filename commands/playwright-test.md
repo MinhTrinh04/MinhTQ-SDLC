@@ -18,7 +18,18 @@ The content here is a **user-flow description** (what a user does in the UI, ste
 ## Orchestration
 
 1. Parse `$ARGUMENTS` for exactly one of the three forms above. Build the normalized flow block: `{source, content, origin_link}`.
-2. Check whether Playwright is actually installed/configured in the target repo: look for a Playwright config file (`playwright.config.ts`/`.js`/`.mjs`/`.mts`/`.cjs`, at the repo root or a workspace/package root if this is a monorepo) and a `@playwright/test` (or `playwright`) dependency in the relevant `package.json` (root, or the workspace package's own, honoring a hoisted root dependency). If neither can be found after checking both root and workspace level, **say so plainly and STOP** — do not install, configure, or scaffold Playwright yourself; setting up test infrastructure is out of scope for this command.
+2. Check whether Playwright is actually installed/configured in the target repo: look for a Playwright config file (`playwright.config.ts`/`.js`/`.mjs`/`.mts`/`.cjs`, at the repo root or a workspace/package root if this is a monorepo) and a `@playwright/test` (or `playwright`) dependency in the relevant `package.json` (root, or the workspace package's own, honoring a hoisted root dependency).
+   - If found: continue to Step 3.
+   - If neither can be found after checking both root and workspace level: **STOP and ask via `AskUserQuestion`** — "Playwright chưa được cài trong repo này. Bạn muốn làm gì?":
+     - "Cài Playwright giúp tôi (`npm init playwright@latest`)" (recommended)
+     - "Để tôi tự cài — dừng lệnh ở đây"
+     - "Cancel"
+     - **"Để tôi tự cài" or "Cancel":** stop here, do not install anything.
+     - **"Cài Playwright giúp tôi":**
+       1. Determine install location: single-package repo → repo root. Monorepo → find the frontend workspace by checking each workspace `package.json` for a `react`/`vue`/`@angular/core`/`svelte`/`next`/`vite` dependency; if exactly one matches, install there. If zero or more than one match (genuinely ambiguous), **STOP and ask via `AskUserQuestion`** which workspace path to install into — never guess.
+       2. Run `npm init playwright@latest -- --yes` (non-interactive) in that directory via Bash, capturing full output. This scaffolds `playwright.config.*`, an example test, and adds the dependency.
+       3. Re-check for the config file + dependency (same check as above). If still missing, **STOP and report the exact install output** — do not retry, do not fall back to a manual `npm i -D @playwright/test && npx playwright install` substitution without telling the user why the first attempt failed.
+       4. On success, state plainly what was installed and where, then continue to Step 3.
 3. Search the target repo for an existing Playwright test covering this flow (via Glob over the project's test directory — e.g. `tests/**/*.spec.ts`, `e2e/**/*.spec.ts`, or wherever `playwright.config.*` points its `testDir` at) before writing a new one, to avoid a duplicate test for the same flow.
 4. Do **not** invoke `flow-brainstorm` or `flow-plan` — this command has no human approval gate. Synthesize a minimal implementation plan inline:
    - Task 1: if Step 3 found no existing test for this flow, write one derived from the user-flow description (concrete steps → Playwright actions/assertions, following the target repo's existing test file conventions if any exist, otherwise the framework's own conventions). Derive the new test file's name using the same sanitization rule as the plan-file `<slug>` in Step 5 below (lowercase, strip/replace anything outside `a-z0-9-`) before it is ever interpolated into a shell command — never build a filename or shell argument directly from raw, untrusted flow-description text. If an existing test already covers this flow, skip straight to Task 2 and say so plainly in the plan.
@@ -30,7 +41,9 @@ The content here is a **user-flow description** (what a user does in the UI, ste
 ## Hard rules
 
 - Never invoke `flow-brainstorm` or `flow-plan` from this command — there is no approval gate, by design, unlike `/flow` and `/flow-batch`.
-- Never install, initialize, or configure Playwright in the target repo if it's missing — stop and report the gap instead.
+- Never install Playwright without the human explicitly picking that option via `AskUserQuestion` first — no silent install.
+- Never guess which workspace is the frontend one in a monorepo when more than one (or none) has a recognizable frontend dependency — ask instead.
+- Never substitute a different install command or retry after a failed `npm init playwright@latest` — report the exact failure and stop.
 - Never write a duplicate Playwright test for a flow that already has one — always Glob for an existing test first.
 - Never guess the Playwright run command if it's undocumented — always ask via `AskUserQuestion`.
 - Never interpolate a filename or shell argument derived from raw flow-description text without sanitizing it first (same rule as the plan-file slug).
