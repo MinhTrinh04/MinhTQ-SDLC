@@ -503,3 +503,102 @@ Same note as Task 1 Step 4. Additionally, if the scratch repos under `/tmp/flow-
 - **Spec coverage:** Mục 1 (pipeline/gates) → Tasks 4-7. Mục 2 (file locations, subagents) → Tasks 1-3 file paths, Task 4/5 doc output paths. Mục 3 (overlap table) → not implemented here by design (future commands reuse these same skills/subagents; out of scope per the spec's own sequencing). Mục 4 (input adapter) → Task 7. Mục 5 (principles) → encoded as Global Constraints and hard-rule sections in every task. Mục 6 → this plan *is* items 1-5; item 6 (`/flow-batch`) is explicitly deferred to its own future plan.
 - **Placeholder scan:** every step above has literal file content or literal commands; no "TBD"/"similar to Task N" occurrences.
 - **Type/name consistency:** `verifier`/`planner`/`reviewer` subagent names match exactly between their defining tasks (1-3) and every skill that invokes them (4-6). Doc paths (`docs/flow/specs/`, `docs/flow/plans/`) are consistent across Tasks 4, 5, and the header.
+
+---
+
+## Redesign: auto_approve tự quyết ở Step 4 (added 2026-09-16)
+
+**Mục tiêu:** khi `auto_approve` được bật, Step 4 của `flow-brainstorm` không còn gọi `AskUserQuestion` cho các gap thật sự tìm thấy — thay vào đó tự chọn phương án bảo thủ nhất cho từng gap, ghi lại thành 1 dòng `Giả định:`, và Step 6 gom các dòng này để hiển thị (thêm mục vào spec file nếu Architectural, hoặc vào tóm tắt chat nếu Bounded/Spike).
+
+**Approved design:** đã duyệt qua `AskUserQuestion` trong hội thoại ngày 2026-09-16 (thay đổi Bounded, chỉ đụng `skills/flow-brainstorm/SKILL.md`; `skills/flow-plan/SKILL.md` không đổi vì không có bước hỏi clarifying question tương đương).
+
+---
+
+### Task 8: `flow-brainstorm` auto_approve tự quyết ở Step 4 (added 2026-09-16)
+
+**Files:**
+- Modify: `skills/flow-brainstorm/SKILL.md`
+
+**Interfaces:**
+- Consumes: cờ `auto_approve: true` đã có sẵn (đã nối qua Step 7 gate từ trước).
+- Produces: danh sách dòng `Giả định: <câu, tiếng Việt>` được thu thập ở Step 4, hiển thị ở Step 6 (mục mới `## Giả định tự quyết (auto-approve)` trong spec file nếu Architectural; inline trong tóm tắt chat nếu Bounded/Spike).
+
+- [ ] **Step 1: Viết lại câu auto_approve trong mục Input (SKILL.md, dòng 10)**
+
+Old (nguyên văn, giữ nguyên phần trước/sau trong cùng đoạn):
+```
+`auto_approve` only removes the Step 7 approval gate — it never skips Step 4's genuine clarifying questions. If mid-brainstorm you find real ambiguity that changes the shape of the work, still ask via `AskUserQuestion` for that, auto-approve or not.
+```
+New:
+```
+`auto_approve` removes both the Step 7 approval gate AND Step 4's live clarifying questions: under `auto_approve`, Step 4 never calls `AskUserQuestion` — instead, for each genuine gap, self-decide the most conservative option and record it as a `Giả định:` line (see Step 4 below). If mid-brainstorm you find real ambiguity that changes the shape of the work, still resolve it the same way (self-decide + record), auto-approve or not — never silently skip it either way.
+```
+
+- [ ] **Step 2: Viết lại Step 4 (SKILL.md, dòng 21) thành nhánh theo auto_approve**
+
+Old:
+```
+4. **Ask clarifying questions**, one at a time, only for genuine gaps. Prefer multiple-choice.
+```
+New:
+```
+4. **Resolve clarifying gaps** — behavior branches on `auto_approve`:
+   - **`auto_approve` NOT set:** ask via `AskUserQuestion`, one at a time, only for genuine gaps. Prefer multiple-choice.
+   - **`auto_approve` set:** never call `AskUserQuestion` in this step. For each genuine gap found, pick the most conservative option, in this priority order: (1) match an existing convention already present in this repo, (2) backward-compatible choice, (3) never destructive/irreversible, (4) fall back to the common/standard pattern for the relevant language/framework. Record each such choice as one line: `Giả định: <câu, tiếng Việt>`. Collect all these assumption lines — Step 6 surfaces them.
+```
+
+- [ ] **Step 3: Thêm phần hiển thị giả định vào Step 6 (SKILL.md, dòng 24-26)**
+
+Bullet Spike (dòng 24), append vào cuối câu hiện có:
+```
+ If Step 4 recorded any `Giả định:` lines (auto_approve only), include them in this chat summary.
+```
+
+Bullet Bounded (dòng 25), append vào cuối câu hiện có:
+```
+ If Step 4 recorded any `Giả định:` lines (auto_approve only), include them in this chat summary.
+```
+
+Bullet Architectural (dòng 26), chèn câu mới ngay sau đoạn "...append the new section in Vietnamese, do not translate the rest." và trước "If it doesn't exist yet, create...":
+```
+ If Step 4 recorded any `Giả định:` lines (auto_approve only), append a `## Giả định tự quyết (auto-approve)` section to the spec file listing them, in Vietnamese.
+```
+
+- [ ] **Step 4: Xoá Hard rule không còn đúng (SKILL.md, dòng 48)**
+
+Xoá nguyên dòng:
+```
+- Never let `auto_approve` suppress a genuine Step 4 clarifying question — it only removes the Step 7 approval gate, nothing upstream of it.
+```
+
+- [ ] **Step 5: Thêm 2 Hard rule mới thay vào đúng vị trí đó**
+
+```
+- Under `auto_approve`, Step 4 never calls `AskUserQuestion` — but every self-decided gap must be recorded as an explicit `Giả định:` line; never resolve a gap silently without recording it.
+- Never pick a high-risk/destructive/irreversible option as the default when self-deciding under `auto_approve` — always the most conservative valid option, per the Step 4 priority order.
+```
+
+- [ ] **Step 6: Kiểm tra không còn câu chữ mâu thuẫn**
+
+Run: `grep -niE "only removes the Step 7|never skips Step 4" "skills/flow-brainstorm/SKILL.md"`
+Expected: không có match nào (câu cũ đã sai hoàn toàn biến mất khỏi cả Input section lẫn Hard rules).
+
+- [ ] **Step 7: Chạy test command của chính repo này**
+
+Run: `bash -c 'grep -rniE "TBD|todo:|fill in|placeholder" commands/*.md skills/*/SKILL.md agents/*.md && echo FAIL && exit 1 || echo PASS'`
+Expected: `PASS`.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add skills/flow-brainstorm/SKILL.md docs/flow/plans/flow-core-pipeline-plan.md && git commit -m "feat(flow-brainstorm): auto_approve self-decides Step 4 gaps, records Giả định lines"
+```
+
+---
+
+## Self-Review Notes (Task 8)
+
+- **Spec coverage:** cả 4 điểm trong approved design map 1:1 vào các step: điểm 1 (branch Step 4) → Step 2; điểm 2 (hiển thị giả định ở Step 6) → Step 3; điểm 3 (viết lại Input) → Step 1; điểm 4 (Hard rules) → Step 4-5.
+- **Placeholder scan:** mọi block old/new ở trên là nội dung thật lấy nguyên văn từ file hiện tại hoặc nội dung mới sẽ chèn — không có "TBD", không có "tương tự Task N".
+- **Type/name consistency:** tiền tố `Giả định:` và tiêu đề `## Giả định tự quyết (auto-approve)` dùng giống hệt nhau giữa Step 4 và Step 6 — cùng 1 chuỗi, không lệch.
+- **Ghi chú phạm vi (không im lặng bỏ qua):** `skills/flow-plan/SKILL.md` không đổi gì trong task này — đã xác nhận ở bước brainstorm là nó không có bước hỏi clarifying question tương đương. Ngoài ra, Step 7 auto_approve gate (đã lên production ở một thay đổi trước, dòng 32-36 hiện tại của SKILL.md) chưa từng được ghi thành 1 Task riêng trong file plan này — Task 8 này không hồi tố ghi lại phần đó, chỉ cover đúng phạm vi thay đổi Step 4/6/Input/Hard-rules theo approved design lần này.
