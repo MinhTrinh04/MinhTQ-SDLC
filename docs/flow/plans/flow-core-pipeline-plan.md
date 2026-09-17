@@ -602,3 +602,245 @@ git add skills/flow-brainstorm/SKILL.md docs/flow/plans/flow-core-pipeline-plan.
 - **Placeholder scan:** mọi block old/new ở trên là nội dung thật lấy nguyên văn từ file hiện tại hoặc nội dung mới sẽ chèn — không có "TBD", không có "tương tự Task N".
 - **Type/name consistency:** tiền tố `Giả định:` và tiêu đề `## Giả định tự quyết (auto-approve)` dùng giống hệt nhau giữa Step 4 và Step 6 — cùng 1 chuỗi, không lệch.
 - **Ghi chú phạm vi (không im lặng bỏ qua):** `skills/flow-plan/SKILL.md` không đổi gì trong task này — đã xác nhận ở bước brainstorm là nó không có bước hỏi clarifying question tương đương. Ngoài ra, Step 7 auto_approve gate (đã lên production ở một thay đổi trước, dòng 32-36 hiện tại của SKILL.md) chưa từng được ghi thành 1 Task riêng trong file plan này — Task 8 này không hồi tố ghi lại phần đó, chỉ cover đúng phạm vi thay đổi Step 4/6/Input/Hard-rules theo approved design lần này.
+
+---
+
+## Redesign: Tiered verify + tích hợp Playwright vào flow-plan (added 2026-09-17)
+
+**Mục tiêu:** (1) `verifier`/`flow-execute` dùng test rút gọn (changed-only, nếu project khai báo) cho các vòng retry-vì-FAIL để tiết kiệm quota/thời gian, nhưng luôn có 1 lần full-suite xác nhận riêng (không tính vào quỹ 3 vòng) trước khi tuyên bố PASS thật. (2) `flow-plan` tự phát hiện task đụng frontend/UI và tự thêm 1 task viết/tái dùng Playwright test, tái dùng đúng logic cài đặt + dedupe của `commands/playwright-test.md` thay vì viết lại.
+
+**Approved design:** đã duyệt qua `AskUserQuestion` trong hội thoại ngày 2026-09-17 (2 thay đổi Bounded, độc lập nhau — Task 9 đụng `agents/verifier.md` + `skills/flow-execute/SKILL.md`, Task 10 đụng `skills/flow-plan/SKILL.md`).
+
+**Lưu ý phạm vi (không im lặng bỏ qua):** khảo sát phát hiện `docs/flow/plans/playwright-test-plan.md` hiện lỗi thời so với file thật `commands/playwright-test.md` (plan doc vẫn ghi "thiếu Playwright thì STOP, không cài", nhưng file thật đã có nhánh hỏi cài qua `AskUserQuestion` từ một thay đổi trước). Không thuộc phạm vi 2 task dưới đây — Task 9/10 lấy nguyên văn từ file thật, không dùng `playwright-test-plan.md` làm nguồn. Cần 1 task riêng sau này để đồng bộ lại doc đó.
+
+---
+
+### Task 9: Tiered verify — `agents/verifier.md` + `skills/flow-execute/SKILL.md` (added 2026-09-17)
+
+**Files:**
+- Modify: `agents/verifier.md`
+- Modify: `skills/flow-execute/SKILL.md`
+
+**Interfaces:**
+- Consumes: target repo's `CLAUDE.md` — kiểm tra thêm 1 section tuỳ chọn `## Test (changed-only)` bên cạnh `## Test` gốc đã đọc từ trước.
+- Produces: report của `verifier` có thêm định dạng 2 dòng tuỳ điều kiện (`Command (changed-only): ... → PASS|FAIL` + `Command (full suite, confirmation): ... → PASS|FAIL`) chỉ khi changed-only command được khai báo và dùng; ngược lại giữ nguyên dòng `Command:` đơn như cũ. Ngữ nghĩa quỹ retry của `flow-execute` đổi: quỹ ≤3 vòng chỉ tính vòng chạy vì FAIL thật cần sửa; vòng xác nhận full-suite đầu tiên sau khi PASS lần đầu không tính vào quỹ, nhưng nếu vòng xác nhận đó FAIL thì tính từ đó và chuyển hẳn sang full-suite-only cho phần còn lại của task.
+
+**Ví dụ minh hoạ 2 kịch bản** (để giảm rủi ro hiểu sai khi thực thi):
+- *Kịch bản A — xác nhận PASS ngay:* Vòng 1 chạy changed-only → PASS (0/3 quỹ dùng, vì đây không phải vòng sửa-vì-FAIL). Chạy thêm 1 vòng full-suite xác nhận → PASS. Overall: PASS. Tổng cộng 2 lần chạy test, 0/3 quỹ retry bị dùng.
+- *Kịch bản B — xác nhận FAIL:* Vòng 1 chạy changed-only → PASS. Vòng xác nhận full-suite → FAIL (lộ ra 1 test khác bị ảnh hưởng mà changed-only bỏ sót). Tính là vòng FAIL #1/3. Sửa, chạy lại — từ giờ luôn dùng full-suite (không quay lại changed-only nữa dù CLAUDE.md vẫn khai báo) — đây là vòng #2/3. PASS → Overall: PASS. Tổng cộng dùng 2/3 quỹ retry.
+
+- [ ] **Step 1: Sửa Step 1 của "What you do" trong `agents/verifier.md` để đọc cả `## Test (changed-only)`**
+
+Old (dòng 11):
+```
+1. Read the target project's `CLAUDE.md` (or equivalent project doc) to find its test, lint, and build commands. If none is documented, say so explicitly in your report — do not guess a command. This is not a neutral outcome: not being able to verify means you cannot confirm the change is safe, so it counts as **Overall: FAIL** — never report a third value (e.g. "NOT_APPLICABLE") for Overall just because nothing was documented to run.
+```
+New:
+```
+1. Read the target project's `CLAUDE.md` (or equivalent project doc) to find its test, lint, and build commands. If none is documented, say so explicitly in your report — do not guess a command. This is not a neutral outcome: not being able to verify means you cannot confirm the change is safe, so it counts as **Overall: FAIL** — never report a third value (e.g. "NOT_APPLICABLE") for Overall just because nothing was documented to run. Also check whether `CLAUDE.md` declares a separate `## Test (changed-only)` section (a project-declared changed-only command, e.g. `jest --onlyChanged`, `vitest related`, `pytest --testmon`) in addition to the full-suite `## Test` section. If `## Test (changed-only)` is NOT declared, always use the full suite (`## Test`) for every round — never guess a shortcut command yourself.
+```
+
+- [ ] **Step 2: Thêm mô tả tiered-verify round logic vào "What you do" (Step 2 hiện có)**
+
+Old (dòng 12):
+```
+2. Run those commands via Bash, exactly as documented, and capture full output.
+```
+New:
+```
+2. Run those commands via Bash, exactly as documented, and capture full output. When `flow-execute` tells you this dispatch is a retry-because-FAIL round and `## Test (changed-only)` is declared, run the changed-only command for that round instead of the full suite (this is the caller's decision per its own retry-budget rules — you just run whichever command you're told applies). When `## Test (changed-only)` is not declared, or this is not a retry-because-FAIL round, run the full-suite `## Test` command as always.
+```
+
+- [ ] **Step 3: Thêm nhánh output format cho tiered verify vào Output format section**
+
+Old (dòng 25-33, nguyên khối code fence):
+```
+## Verify Report
+- Command: <exact command> → PASS|FAIL
+  <if FAIL: last ~30 lines of output>
+  <if no command was documented: state that explicitly here instead of a command/result line>
+- Playwright flow: <flow name> → PASS|FAIL|NOT_APPLICABLE
+  <if FAIL: trace/error summary>
+Overall: PASS | FAIL
+```
+New (thay khối code fence cũ bằng 2 khối có điều kiện):
+```
+When tiered verify is NOT in play for this dispatch (no `## Test (changed-only)` declared, or this round isn't distinguishing changed-only vs. full-suite):
+
+## Verify Report
+- Command: <exact command> → PASS|FAIL
+  <if FAIL: last ~30 lines of output>
+  <if no command was documented: state that explicitly here instead of a command/result line>
+- Playwright flow: <flow name> → PASS|FAIL|NOT_APPLICABLE
+  <if FAIL: trace/error summary>
+Overall: PASS | FAIL
+
+When tiered verify IS in play (a changed-only command was declared and this dispatch ran it, or ran the full-suite confirmation round after a changed-only PASS):
+
+## Verify Report
+- Command (changed-only): <exact command> → PASS|FAIL
+  <if FAIL: last ~30 lines of output>
+- Command (full suite, confirmation): <exact command> → PASS|FAIL
+  <if FAIL: last ~30 lines of output>
+- Playwright flow: <flow name> → PASS|FAIL|NOT_APPLICABLE
+  <if FAIL: trace/error summary>
+Overall: PASS | FAIL
+
+Only include whichever of the two `Command (...)` lines actually ran in this dispatch — a single retry-because-FAIL round run with the changed-only command reports only the `Command (changed-only):` line; a confirmation-round dispatch reports only the `Command (full suite, confirmation):` line. Never print both lines from a single dispatch that only ran one command.
+```
+
+- [ ] **Step 4: Thêm câu làm rõ ngay sau câu Overall hiện có (giữ nguyên câu cũ, chèn thêm câu mới)**
+
+Old (dòng 35, giữ nguyên không đổi):
+```
+`Overall` has exactly two possible values, always — `PASS` or `FAIL`. There is no third value, and no synonym for either ("N/A", "NOT_APPLICABLE", "NOT RUN", "UNKNOWN", etc. are all invalid on this line). `NOT_APPLICABLE` exists only on the Playwright flow line (a per-check status meaning "this check didn't apply here"), never on the `Overall` line. If nothing was documented to run at all, that is exactly the case Step 1 covers: write the literal line `Overall: FAIL`.
+```
+New (append câu mới ngay sau, cùng section):
+```
+When `## Test (changed-only)` is declared, use the two-line `Command (changed-only): ... → PASS|FAIL` / `Command (full suite, confirmation): ... → PASS|FAIL` format above instead of the single `Command:` line — never mix the two formats in one report, and never invent the two-line format when no changed-only command was declared.
+```
+
+- [ ] **Step 5: Sửa Step 4 của Process trong `skills/flow-execute/SKILL.md` để implement round logic (thay toàn bộ khối)**
+
+Old (dòng 17-20):
+```
+4. After all tasks are done, dispatch the `verifier` subagent (Task 2) with the full diff/changed-file list.
+   - PASS → continue to step 5.
+   - FAIL → read the failure output, fix the specific issue, dispatch `verifier` again.
+   - **Hard limit: 3 verify rounds total.** If round 3 still FAILs, STOP immediately — print the exact failing command/output from each of the 3 rounds — and do not attempt a 4th fix. This is not negotiable regardless of how close the failure looks to being fixed.
+```
+New:
+```
+4. After all tasks are done, dispatch the `verifier` subagent (Task 2) with the full diff/changed-file list. Before the first dispatch, check the target `CLAUDE.md` for a `## Test (changed-only)` section — if present, tell `verifier` this round may use the changed-only command; if absent, tell `verifier` to always use the full suite (no change from today).
+   - PASS → if a changed-only command was declared AND this PASS was the first PASS reported for this task (i.e. you have not yet run a full-suite confirmation round for this task), dispatch `verifier` exactly one more time telling it to run the full-suite command as a confirmation round. This confirmation round does **not** count against the ≤3 retry budget below.
+     - Confirmation round PASS → Overall: PASS for this task, continue to step 5.
+     - Confirmation round FAIL → treat this as a real FAIL: it now counts as round 1 against the ≤3-round budget from here on, go back and fix the specific issue, and for every remaining round in **this task** always tell `verifier` to use the full suite (never changed-only again for this task, even though `CLAUDE.md` still declares a changed-only command).
+   - If no `## Test (changed-only)` section is declared, or a full-suite confirmation round already ran and PASSed for this task: PASS → continue to step 5 directly, no confirmation round (this is identical to today's behavior).
+   - FAIL (from any round that counts against the budget) → read the failure output, fix the specific issue, dispatch `verifier` again.
+   - **Hard limit: 3 verify rounds total, counting only rounds run because of a real FAIL needing a fix** (the one-time full-suite confirmation-after-first-PASS round never counts toward this limit; a confirmation-round FAIL DOES start counting from that point). If the 3rd counted round still FAILs, STOP immediately — print the exact failing command/output from each of the 3 counted rounds — and do not attempt a 4th fix. This is not negotiable regardless of how close the failure looks to being fixed.
+```
+
+- [ ] **Step 6: Kiểm tra không còn câu chữ mâu thuẫn**
+
+Run: `grep -n "verify round\|Hard limit: 3" "skills/flow-execute/SKILL.md"`
+Expected: chỉ còn đúng 1 định nghĩa "Hard limit: 3" (bản mới ở Step 5), không có câu cũ sót lại nói "3 verify rounds total" mà thiếu điều kiện "counting only rounds run because of a real FAIL".
+
+- [ ] **Step 7: Chạy test command của chính repo này**
+
+Run: `bash -c 'grep -rniE "TBD|todo:|fill in|placeholder" commands/*.md skills/*/SKILL.md agents/*.md && echo FAIL && exit 1 || echo PASS'`
+Expected: `PASS`.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add agents/verifier.md skills/flow-execute/SKILL.md docs/flow/plans/flow-core-pipeline-plan.md && git commit -m "feat(verifier,flow-execute): tiered verify — changed-only retry rounds + one free full-suite confirmation"
+```
+
+---
+
+### Task 10: Tự thêm task Playwright vào `skills/flow-plan/SKILL.md` (added 2026-09-17)
+
+**Files:**
+- Modify: `skills/flow-plan/SKILL.md`
+
+**Interfaces:**
+- Consumes: draft plan (task list, mỗi task có Files create/modify) từ `planner` subagent (Step 1 hiện có); `CLAUDE.md` của target repo — section tuỳ chọn khai cấu trúc thư mục FE.
+- Produces: khi có ít nhất 1 task đụng FE, thêm 1 task mới tên `Viết/tái dùng Playwright test cho <mô tả ngắn>`, Files/Interfaces trỏ vào logic Step 2 (install-check) và Step 3 (Glob-dedupe) của `commands/playwright-test.md` bằng tham chiếu, không viết lại logic đó.
+
+- [ ] **Step 1: Thêm bước quét FE + tự thêm task Playwright ngay sau Step 1 hiện có, đổi Step 2 cũ thành Step 3**
+
+Old (dòng 16-17):
+```
+1. Dispatch the `planner` subagent (`Agent` tool, `subagent_type: "planner"`) with the approved design and the target repo path. Let it survey the codebase and return a draft plan.
+2. Turn the draft into the final plan document: numbered tasks, each with exact Files (create/modify/test) and Interfaces (consumes/produces — exact names/types so a task can be read alone), bite-sized steps (one action each), test-first when a test runner exists in the project.
+```
+New:
+```
+1. Dispatch the `planner` subagent (`Agent` tool, `subagent_type: "planner"`) with the approved design and the target repo path. Let it survey the codebase and return a draft plan.
+2. Scan the draft plan's tasks for frontend/UI touches: a task counts as "touches frontend/UI" if any file in its Files (create/modify) list matches:
+   - Priority 1: if the target repo's `CLAUDE.md` declares its own frontend directory structure (a section explicitly describing the FE path), use that declared path to match files against.
+   - Priority 2 (fallback, only when no such declaration exists in `CLAUDE.md`): extension `.tsx`/`.jsx`/`.vue`/`.svelte`, or a path containing one of `frontend/`, `client/`, `web/`, `ui/`, `pages/`, `components/`.
+   If at least one task touches FE, append one new task at the very end of the plan (after every other task, highest task number), titled `Viết/tái dùng Playwright test cho <mô tả ngắn của flow chính bị thay đổi>`. This task's Files section must point at the actual test file to create or reuse (found via the same Glob-dedupe check as `commands/playwright-test.md` Step 3); its Interfaces section must state plainly that it invokes the same mechanism as `commands/playwright-test.md` (Step 2's install-check — including the `AskUserQuestion` gate offering to install Playwright if missing — and Step 3's Glob-for-existing-test-before-writing-new), reusing that exact logic by reference rather than re-describing or re-implementing it here. If no task touches FE, add nothing — behavior is unchanged.
+3. Turn the draft (plus the Step 2 Playwright task, if added) into the final plan document: numbered tasks, each with exact Files (create/modify/test) and Interfaces (consumes/produces — exact names/types so a task can be read alone), bite-sized steps (one action each), test-first when a test runner exists in the project.
+```
+
+- [ ] **Step 2: Dịch số các bước còn lại (3→4, 4→5, 5→6, 6→7) — nội dung câu chữ giữ nguyên, chỉ đổi số thứ tự đầu dòng, trừ Step 6 (thành 7) thêm 1 vế mới**
+
+Old (dòng 18, Step 3 cũ):
+```
+3. No unfinished stand-ins: every step must have real content — actual code, actual commands, actual expected output. Never "add tests for the above" or leave a value undecided for later.
+```
+New (đổi số thành 4, nội dung y hệt):
+```
+4. No unfinished stand-ins: every step must have real content — actual code, actual commands, actual expected output. Never "add tests for the above" or leave a value undecided for later.
+```
+
+Old (dòng 19-24, Step 4 cũ, khối "Write the plan doc content in Vietnamese..." + "Before saving, check whether..."):
+Đổi số đầu dòng từ `4.` thành `5.` — toàn bộ nội dung bên trong giữ nguyên y hệt, không đổi wording.
+
+Old (dòng 25, Step 5 cũ "Self-review"):
+```
+5. Self-review: check every requirement from the approved design has a task, check no unfinished stand-in content slipped in, check type/signature names are consistent task-to-task. Fix inline.
+```
+New (đổi số thành 6, thêm vế kiểm tra Playwright task):
+```
+6. Self-review: check every requirement from the approved design has a task, check no unfinished stand-in content slipped in, check type/signature names are consistent task-to-task, check the Playwright task from Step 2 was added when (and only when) at least one task touches FE. Fix inline.
+```
+
+Old (dòng 26-35, Step 6 cũ — toàn bộ khối approval-gate "The plan file is on disk but not yet committed..."):
+Đổi số đầu dòng từ `6.` thành `7.` — toàn bộ nội dung bên trong (AskUserQuestion gate, nhánh auto_approve...) giữ nguyên y hệt, không đổi.
+
+- [ ] **Step 3: Sửa các tham chiếu "Step 6" còn sót lại trong Hard rules cho khớp số mới**
+
+Old (dòng 42):
+```
+- The approval gate in Step 6 uses `AskUserQuestion` with concrete options — never a bare prose question expecting free-text reply.
+```
+New:
+```
+- The approval gate in Step 7 uses `AskUserQuestion` with concrete options — never a bare prose question expecting free-text reply.
+```
+
+Old (dòng 46, cuối Hard rules):
+```
+- Never let `auto_approve` skip Step 5's self-review or let unfinished stand-in content through — it only removes the Step 6 approval gate.
+```
+New:
+```
+- Never let `auto_approve` skip Step 6's self-review or let unfinished stand-in content through — it only removes the Step 7 approval gate.
+```
+
+- [ ] **Step 4: Thêm 2 Hard rule mới cho FE-detection/Playwright-task, chèn cuối danh sách Hard rules**
+
+```
+- Never invent FE-detection logic beyond the two-priority rule (declared CLAUDE.md frontend path, else the fixed extension/path-substring fallback list) — and never add a Playwright task when no task's Files touch FE.
+- Never re-describe or duplicate `commands/playwright-test.md`'s install-check (Step 2) or Glob-dedupe (Step 3) logic inline in the new task — reference/reuse it, so a future edit to that command doesn't need a matching edit here.
+```
+
+- [ ] **Step 5: Kiểm tra không còn tham chiếu số bước sai**
+
+Run: `grep -n "Step [0-9]" "skills/flow-plan/SKILL.md"`
+Expected: đọc lại toàn bộ output thủ công, xác nhận trình tự 1→7 nhất quán xuyên suốt Process và Hard rules, không còn "Step 5"/"Step 6" trỏ sai vị trí cũ.
+
+- [ ] **Step 6: Chạy test command của chính repo này**
+
+Run: `bash -c 'grep -rniE "TBD|todo:|fill in|placeholder" commands/*.md skills/*/SKILL.md agents/*.md && echo FAIL && exit 1 || echo PASS'`
+Expected: `PASS`.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add skills/flow-plan/SKILL.md docs/flow/plans/flow-core-pipeline-plan.md && git commit -m "feat(flow-plan): append Playwright test task when a plan touches FE, reusing playwright-test.md's install-check + dedupe logic"
+```
+
+---
+
+## Self-Review Notes (Task 9 + 10)
+
+- **Spec coverage:** Mục 1 (tiered verify: nguồn changed-only command, ngữ nghĩa quỹ ≤3 vòng, vòng xác nhận, chuyển hẳn full-suite sau khi xác nhận FAIL, định dạng output 2 dòng vs 1 dòng) → Task 9 Step 1-5. Mục 2 (Playwright vào flow-plan: quy tắc 2-ưu-tiên FE-detection, task mới được thêm, tái dùng không viết lại Step 2/3 của playwright-test.md) → Task 10 Step 1, 4.
+- **Placeholder scan:** mọi block Old/New ở trên trích nguyên văn từ nội dung file thật đã khảo sát (không dùng `playwright-test-plan.md`, vốn lỗi thời) hoặc là nội dung mới đầy đủ — không có "TBD", không có "tương tự Task N".
+- **Type/name consistency:** tên subagent `verifier`, skill `flow-execute`, skill `flow-plan`, file `commands/playwright-test.md` dùng nhất quán với tên hiện có trong 4 file đã khảo sát.
+- **Rủi ro đã ghi nhận, không im lặng bỏ qua:**
+  1. `docs/flow/plans/playwright-test-plan.md` lỗi thời so với `commands/playwright-test.md` thật — đã ghi ở đầu Redesign heading phía trên, cần 1 task riêng sau này để đồng bộ, không thuộc phạm vi Task 9/10.
+  2. Task 10 Step 1 đổi số toàn bộ Process steps của `flow-plan/SKILL.md` từ 1-6 thành 1-7 — phải làm đúng thứ tự Step 1→Step 5 của Task 10, Step 5 (grep kiểm tra) là bước bắt buộc để bắt lỗi sót số.
+  3. Task 9's retry-round logic là thay đổi hành vi tinh vi nhất trong plan này (điều kiện "PASS lần đầu" phải track theo từng task riêng lẻ, không phải global) — đã thêm ví dụ minh hoạ 2 kịch bản ngay sau phần Interfaces của Task 9 để giảm rủi ro hiểu sai khi thực thi.
