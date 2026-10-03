@@ -51,18 +51,25 @@ Toàn bộ nội dung Tầng 1 (`CLAUDE.md` global, `agents/`, `commands/`, `set
 
 **Không clone trực tiếp đè lên `~/.claude/`** — thư mục này đã có sẵn cache, session history, config khác của Claude Code; clone đè có thể gây xung đột hoặc mất dữ liệu không thuộc repo.
 
-**Cách làm đúng — clone vào thư mục riêng rồi symlink:**
+**Cách làm đúng — clone vào thư mục riêng rồi chạy script cài đặt:**
 
 ```bash
 # 1. Clone vào thư mục riêng, KHÔNG phải ~/.claude
 git clone https://github.com/<ban>/claude-code-setup.git ~/claude-code-setup
+cd ~/claude-code-setup
 
-# 2. Symlink từng phần cần thiết vào ~/.claude/
-ln -s ~/claude-code-setup/CLAUDE.md   ~/.claude/CLAUDE.md
-ln -s ~/claude-code-setup/agents      ~/.claude/agents
-ln -s ~/claude-code-setup/commands    ~/.claude/commands
-ln -s ~/claude-code-setup/settings.json ~/.claude/settings.json
+# 2. Cài đặt (tạo link vào ~/.claude/)
+.\install.cmd        # Windows (cmd/PowerShell) — dùng directory junction, không cần quyền admin
 ```
+
+Script link `agents/`, `commands/` và **từng thư mục con** của `skills/` vào `~/.claude/` (không link cả `skills/` vì `~/.claude/skills/` còn chứa thư mục do Claude tự quản lý như `synced/`). Đặc điểm:
+
+- **Chạy lại bao nhiêu lần cũng được** (idempotent): link đã đúng thì bỏ qua; thêm skill mới vào repo thì chạy lại để link thêm; skill đã xoá khỏi repo thì link mồ côi được dọn.
+- **Không bao giờ ghi đè dữ liệu thật**: nếu `~/.claude/agents` (v.v.) đã là thư mục thật, script cảnh báo và bỏ qua — hãy backup/đổi tên rồi chạy lại.
+- **Gỡ cài đặt**: `.\install.cmd -Uninstall` — chỉ xoá các link trỏ vào repo này, không đụng file nào khác.
+- Không link `CLAUDE.md` của repo (đó là hướng dẫn test cho chính repo này). Nếu cần `settings.json`/`CLAUDE.md` global, thêm vào script khi có file tương ứng.
+
+> Trên Windows **không dùng `ln -s`**: Git Bash mặc định chỉ copy file chứ không tạo link thật.
 
 **Vì sao dùng symlink thay vì copy hay clone thẳng:**
 
@@ -70,7 +77,7 @@ ln -s ~/claude-code-setup/settings.json ~/.claude/settings.json
 - Copy thường → dễ quên đồng bộ lại, dễ lệch giữa 2 nơi.
 - Clone thẳng vào `~/.claude/` → rủi ro đè mất file hệ thống khác đang nằm chung thư mục.
 
-**Khi cài máy mới:** chỉ cần lặp lại đúng 2 bước trên (clone vào thư mục riêng + symlink) là khôi phục lại toàn bộ hệ thống, không mất gì.
+**Khi cài máy mới:** chỉ cần lặp lại đúng 2 bước trên (clone vào thư mục riêng + chạy `install`) là khôi phục lại toàn bộ hệ thống, không mất gì.
 
 **Khi thêm/sửa command mới (theo Mục 5):** sửa trực tiếp trong `~/claude-code-setup/`, rồi `git add . && git commit && git push` như bình thường — vì đã symlink, `~/.claude/` nhận thay đổi ngay lập tức, không cần thao tác gì thêm.
 
