@@ -1,6 +1,8 @@
 # Thiết kế hệ thống Loop/Workflow cá nhân cho Claude Code
 
 > Tài liệu này là bản spec để đưa cho Claude Code (chạy trên máy cá nhân) tự đọc và triển khai thành hệ thống thật: global CLAUDE.md, subagents, hooks, và slash commands. Mục tiêu: setup 1 lần, mọi project sau chỉ cần gõ lệnh có sẵn.
+>
+> **Bắt đầu nhanh:** xem [mục 1.5](#15-cài-đặt-và-đồng-bộ-qua-github-windows) để cài đặt, [mục 3](#3-danh-mục-slash-commands-menu-lệnh-dùng-hằng-ngày) để biết các lệnh. Chi tiết kỹ thuật (kiến trúc, triển khai thông báo Telegram, vận hành, xử lý sự cố, phát triển) nằm ở [docs/PROJECT.md](docs/PROJECT.md).
 
 ---
 
@@ -45,149 +47,68 @@ Nội dung cần có:
 
 ---
 
-### 1.5 Backup & đồng bộ Tầng 1 qua GitHub (clone + symlink, không clone đè)
+### 1.5 Cài đặt và đồng bộ qua GitHub (Windows)
 
-Toàn bộ nội dung Tầng 1 (`CLAUDE.md` global, `agents/`, `commands/`, `settings.json`) nên được lưu trong **1 repo GitHub riêng** (ví dụ `claude-code-setup`, khuyến nghị để private vì có thể chứa quy ước nội bộ). Đây là repo dạng "dotfiles", chỉ dùng để backup/version control cho `~/.claude/`, không liên quan đến repo của từng project.
+Toàn bộ cấu hình dùng chung (`agents/`, `commands/`, `skills/` và hệ thống thông báo) nằm trong **một repo riêng** — khuyến nghị để private. Repo này không liên quan đến repo của từng project.
 
-**Không clone trực tiếp đè lên `~/.claude/`** — thư mục này đã có sẵn cache, session history, config khác của Claude Code; clone đè có thể gây xung đột hoặc mất dữ liệu không thuộc repo.
-
-**Cách làm đúng — clone vào thư mục riêng rồi chạy script cài đặt (Windows):**
+**Cài đặt (một lần mỗi máy):**
 
 ```powershell
-# 1. Clone vào thư mục riêng, KHÔNG phải ~/.claude
-git clone https://github.com/<ban>/claude-code-setup.git C:\Github\MinhTQ-SDLC
+git clone <url-repo> C:\Github\MinhTQ-SDLC    # vào thư mục riêng, KHÔNG phải ~/.claude
 cd C:\Github\MinhTQ-SDLC
-
-# 2. Cài đặt — chọn 1 trong các lệnh ở bảng dưới
 .\install.cmd
 ```
 
-#### Hướng dẫn sử dụng `install.cmd`
+Xong thì **mở session Claude Code mới** (lệnh, skill và thông báo chỉ được nạp lúc session khởi động). Lệnh cài chạy lại bao nhiêu lần cũng được, không cần quyền admin.
 
-Script có **2 phần độc lập**. Chạy từ thư mục gốc của repo, trong cmd hoặc PowerShell, không cần quyền admin:
-
-| Muốn làm gì | Lệnh |
+| Muốn | Lệnh |
 | --- | --- |
-| **Cài tổng** (links + thông báo) — dùng cho máy mới | `.\install.cmd` |
-| Chỉ cài **links**: `agents/`, `commands/`, các `skills/*` vào `~/.claude/` | `.\install.cmd -Links` |
-| Chỉ cài **thông báo (toast)** khi Claude xong việc hoặc cần bạn | `.\install.cmd -Notify` |
-| Gỡ tất cả những gì script đã thêm | `.\install.cmd -Uninstall` |
-| Chỉ gỡ links | `.\install.cmd -Uninstall -Links` |
-| Chỉ gỡ thông báo | `.\install.cmd -Uninstall -Notify` |
+| Cài tất cả (máy mới) | `.\install.cmd` |
+| Chỉ nối `agents/`, `commands/`, `skills/` vào Claude Code | `.\install.cmd -Links` |
+| Chỉ cài thông báo | `.\install.cmd -Notify` |
+| Gỡ những gì đã cài | `.\install.cmd -Uninstall` (kèm `-Links` hoặc `-Notify` để gỡ riêng từng phần) |
 
-Sau khi chạy xong, **mở session Claude Code mới** (hook và skill chỉ được nạp lúc khởi động session).
+**Dùng hằng ngày:**
 
-**Phần Links** — tạo directory junction từ `~/.claude/` về repo: `agents/`, `commands/` và **từng thư mục con** của `skills/` (không link cả `skills/` vì `~/.claude/skills/` còn chứa thư mục do Claude tự quản lý như `synced/`).
+- **Thêm hay sửa command/skill:** sửa trực tiếp trong repo rồi `git commit` và `git push` như bình thường; Claude Code thấy thay đổi ngay. Riêng **skill mới** thì chạy lại `.\install.cmd -Links` một lần để nối thêm.
+- **Cài máy mới:** clone vào thư mục riêng và chạy `.\install.cmd`, không mất gì.
+- **Đừng clone thẳng vào `~/.claude`** (thư mục đó chứa cache và lịch sử của Claude Code), và **đừng dùng `ln -s`** trên Windows (Git Bash chỉ copy file chứ không tạo link thật).
+- **Dời repo sang thư mục khác:** chạy lại `.\install.cmd`.
+- `CLAUDE.md` **riêng của từng project** (sinh ra bởi `/project-init`) nằm trong repo của project đó, không đưa vào repo này.
 
-- **Chạy lại bao nhiêu lần cũng được** (idempotent): link đã đúng thì bỏ qua; thêm skill mới vào repo thì chạy lại để link thêm; skill đã xoá khỏi repo thì link mồ côi được dọn.
-- **Không bao giờ ghi đè dữ liệu thật**: nếu `~/.claude/agents` (v.v.) đã là thư mục thật, script cảnh báo và bỏ qua — hãy backup/đổi tên rồi chạy lại.
-- Không link `CLAUDE.md` của repo (đó là hướng dẫn test cho chính repo này).
+Chi tiết cách `install.cmd` hoạt động (junction, hook được thêm vào `settings.json`, AppId của toast...) xem [docs/PROJECT.md](docs/PROJECT.md#3-cài-đặt-installcmd).
 
-**Phần Notify** — hiện toast Windows (kèm logo Claude) bằng module BurntToast:
+#### Thông báo khi Claude xong hoặc cần bạn
 
-- Cài BurntToast cho user hiện tại nếu chưa có (cần internet).
-- Gộp 4 hook vào `~/.claude/settings.json`, **giữ nguyên mọi setting khác** và tự backup thành `settings.json.bak`:
-  - `Stop` → toast "Tác vụ đã hoàn thành!" khi Claude làm xong.
-  - `Notification` → toast kèm thông điệp khi Claude cần bạn cấp quyền hoặc đang chờ trả lời.
-  - `UserPromptSubmit` → không hiện gì, chỉ ghi lại giờ bắt đầu lượt để `Stop` biết lượt dài hay ngắn.
-  - `PreToolUse` (chỉ với `AskUserQuestion`) → toast hiện câu hỏi và các lựa chọn khi Claude cần bạn quyết định (ví dụ cổng duyệt của `/flow`).
-- Hook trỏ thẳng vào `hooks\notify.ps1` trong repo (đường dẫn được tính lúc cài). Nếu **di chuyển repo** sang chỗ khác thì chạy lại `.\install.cmd -Notify`.
-- Logo toast là `hooks\claude-logo.png`; muốn đổi logo chỉ cần thay file này.
-- Toast dùng AppId riêng `Claude.Code.Notify` (đăng ký trong `HKCU`, không cần admin; `-Uninstall -Notify` sẽ gỡ). Nhờ vậy bấm vào toast **không** làm Windows bật cửa sổ cmd/PowerShell như toast mặc định của BurntToast. Cần chạy `.\install.cmd -Notify` thì AppId mới có; chưa đăng ký thì script tự dùng toast mặc định.
-- Gỡ lỗi: đặt biến môi trường `CLAUDE_NOTIFY_DEBUG=1` để ghi mọi payload hook vào `%TEMP%\claude-notify-debug.log`.
-- Nếu không thấy toast: tắt **Focus Assist / Do Not Disturb** trong Windows Settings. Bell âm thanh trong VS Code là tuỳ chọn, bật bằng `terminal.integrated.enableBell: true`.
+Sau khi cài, bạn nhận được thông báo (toast Windows kèm logo Claude, không cần cấu hình gì thêm) khi:
 
-#### Thông báo điện thoại qua Relay (Telegram)
+- Claude **làm xong** một lượt.
+- Claude **cần bạn quyết định** (hỏi chọn phương án, ví dụ các cổng duyệt của `/flow`) hoặc đang chờ phản hồi.
 
-Bot token chỉ nằm **một chỗ**: biến môi trường của relay trên Vercel. Mỗi máy chỉ gửi `{project, text}` kèm **khoá riêng của máy** tới `relay/api/notify.js`; relay tra khoá trong MongoDB (chỉ lưu **băm** SHA-256), giới hạn tần suất rồi gọi Telegram. Khoá máy và bản đồ topic nằm trong MongoDB Atlas nên thêm máy/topic **không cần sửa env hay redeploy**. Chưa deploy relay hoặc Vercel gặp sự cố thì chỉ còn toast trên máy.
+Muốn nhận cả trên **điện thoại (Telegram)** khi đi vắng thì cần thiết lập relay **một lần** (Telegram bot, MongoDB Atlas, Vercel): xem [docs/PROJECT.md, mục 6](docs/PROJECT.md#6-triển-khai-relay-từng-bước). Tin điện thoại cố ý chung chung (`Claude cần bạn đưa ra quyết định ở <project>`), và lượt `Stop` chỉ báo khi chạy từ 60 giây trở lên để khỏi spam.
 
-| Sự kiện | Nội dung tin |
-| --- | --- |
-| Claude hỏi bạn chọn phương án (`AskUserQuestion`) | `Claude cần bạn đưa ra quyết định ở <project>` |
-| Claude xin quyền / chờ lâu (`Notification`) | `Claude đang chờ bạn ở <project>` |
-| Claude làm xong (`Stop`) | `Claude đã xong ở <project> (x phút y giây)` — **chỉ gửi nếu lượt chạy ≥ 60 giây** |
+**Tạm tắt hoặc bật lại** (gõ trong Claude Code hoặc terminal):
 
-Tin cố ý chung chung: không gửi code, đường dẫn hay nội dung câu hỏi ra ngoài máy. Cuối tin có ` · <tên máy>` để biết tin đến từ máy nào.
-
-**1. Cài đặt một lần**
-
-**a. Telegram:** `@BotFather` → `/newbot` lấy token. Tạo supergroup, bật *Topics*, **tự tạo** một topic cho mỗi project, thêm bot làm **admin**. Lấy `message_thread_id` từ link topic `https://t.me/c/<chat>/<thread>` (chuột phải topic → Copy Topic Link; hoặc link của một tin bên trong topic `t.me/c/<chat>/<thread>/<message>`). Số đầu sau `/c/` là chat (`TELEGRAM_CHAT_ID` = `-100` + số đó), số thứ hai là `message_thread_id`. Ví dụ `t.me/c/1234567890/5` → chat `-1001234567890`, thread `5`. Topic General không có thread: bỏ qua.
-
-**b. MongoDB Atlas (gói miễn phí M0):**
-
-1. Tạo tài khoản/project trên MongoDB Atlas, *Build a Database* → **M0 Free**, chọn region gần bạn.
-2. *Database Access* → Add New Database User → Authentication *Password*, mật khẩu **mạnh** (nút Autogenerate). Mật khẩu có ký tự đặc biệt phải URL-encode trong chuỗi kết nối.
-3. *Database User Privileges* → *Specific Privileges* → role `readWrite` trên **đúng một database** (ví dụ `claude_notify`), để trống collection. Không dùng quyền "any database", không dùng `atlasAdmin`.
-4. *Network Access* → Add IP Address → `0.0.0.0/0`. **Vì sao:** Vercel serverless không có IP cố định nên không thể giới hạn theo IP. **Bù lại:** kết nối bắt buộc TLS; user DB chỉ có `readWrite` trên một database; mật khẩu mạnh, xoay được bất cứ lúc nào. **Lưu ý rủi ro thật:** DB chỉ chứa băm SHA-256 của khoá 256 bit và id topic nên một bản **sao dữ liệu chỉ-đọc** bị lộ là vô hại; nhưng nếu **chính chuỗi kết nối `MONGODB_URI` (có quyền `readWrite`) bị lộ** thì kẻ gian có thể ghi vào DB (thêm một "máy" giả bằng băm khoá của họ, sửa bản đồ topic) rồi gửi tin vào Telegram của bạn. Vì vậy chỉ đặt `MONGODB_URI` trên Vercel, dùng mật khẩu mạnh, và đổi mật khẩu user DB ngay khi nghi ngờ lộ.
-5. *Connect* → *Drivers* → copy chuỗi `mongodb+srv://<user>:<mật khẩu>@<cluster>.mongodb.net/?retryWrites=true&w=majority`. Đây là `MONGODB_URI` (coi như mật khẩu, chỉ đặt trên Vercel).
-6. Lưu ý: cluster M0 có thể bị tạm dừng khi lâu không dùng (xem chính sách hiện hành của Atlas); khi đó tin điện thoại dừng cho tới khi bật lại, toast vẫn chạy.
-
-**c. Vercel:** Import repo này, **Root Directory = `relay`**, không cần build command. Project Settings → Environment Variables (Production), đặt **một lần** rồi Redeploy:
-
-| Biến | Giá trị |
-| --- | --- |
-| `TELEGRAM_BOT_TOKEN` | token của bot |
-| `TELEGRAM_CHAT_ID` | id supergroup, dạng `-100xxxxxxxxxx` |
-| `MONGODB_URI` | chuỗi kết nối Atlas ở bước b.5 |
-| `NOTIFY_ADMIN_KEY` | khoá admin ngẫu nhiên, **≥ 32 ký tự** (cách sinh bên dưới) |
-| `MONGODB_DB` | tuỳ chọn, tên database; mặc định `claude_notify` (phải khớp database đã cấp quyền ở b.3) |
-
-Sinh `NOTIFY_ADMIN_KEY` (PowerShell 5.1, ra 44 ký tự):
-```powershell
-$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
-```
-Lưu khoá này vào trình quản lý mật khẩu; nó chỉ cần nhập một lần trên máy admin.
-
-Project chưa map topic thì tin vào topic `_default` (nếu có), nếu không có thì vào General. Topic đã bị xoá/đóng thì tin tự gửi lại vào General một lần, không mất. Thu hồi khoá hoặc đổi topic có hiệu lực trong **tối đa 30 giây** (do cache). Nếu MongoDB không truy cập được, relay trả 503 (không gửi tin) và toast vẫn chạy. Giới hạn của relay: chỉ nhận POST, body ≤ 4 KB, `text` ≤ 500, `project` ≤ 100, 30 request/phút/máy (best-effort, giữ trong bộ nhớ). Một IP gửi quá 30 khoá sai mỗi phút sẽ không còn được tra DB (vẫn dùng được khoá đã nằm trong cache) để một cuộc dò khoá không làm cạn giới hạn kết nối/thao tác của cluster M0; tấn công từ nhiều IP vẫn có thể làm relay trả 503 trong lúc đó (toast vẫn chạy). Gói Vercel miễn phí dành cho mục đích phi thương mại; dùng cho công việc công ty cần xem lại điều khoản.
-
-**2. Thiết lập client**
-
-```powershell
-& "$HOME\.claude\notify-ctl.cmd" admin-setup                    # máy admin, một lần: dán URL https://<app>.vercel.app/api/admin và khoá admin (ẩn)
-& "$HOME\.claude\notify-ctl.cmd" machine-add laptop -Apply      # tạo khoá cho CHÍNH máy này, tự ghi notify.relay.json (URL suy ra: /api/admin thành /api/notify)
-& "$HOME\.claude\notify-ctl.cmd" test
-cd <thư mục project>; & "$HOME\.claude\notify-ctl.cmd" topic-add <thread_id>     # map project này với topic; hoặc: topic-add _default <thread_id>
-```
-
-- Khoá admin và khoá máy đều được mã hoá DPAPI theo tài khoản Windows (`notify.admin.json`, `notify.relay.json`), nằm **ngoài repo**, không bao giờ commit. DPAPI chỉ chặn người dùng Windows khác và việc đọc trộm đĩa; **mọi tiến trình chạy dưới tài khoản của bạn đều giải mã được**, và khoá admin điều khiển mọi khoá máy và bản đồ topic, nên chỉ chạy `admin-setup` trên máy bạn tin cậy.
-- Khoá mới của `machine-add` được in **một lần** ra console: đừng bật ghi transcript (`Start-Transcript`) khi chạy lệnh này. Mất khoá (hoặc phản hồi bị mất giữa chừng) thì **tên máy đó đã bị giữ chỗ**: chạy `machine-revoke <tên>` rồi tạo máy mới bằng tên khác (hiện chưa có lệnh xoá hay cấp lại khoá cho một tên đã dùng).
-- **Thêm máy khác sau này:** trên máy admin chạy `machine-add <tên>` (không `-Apply`): khoá chỉ hiện **một lần**. Trên máy mới chạy `relay-setup` (URL `.../api/notify` + khoá đó). Máy mới **không** cần `admin-setup`.
-- **Thu hồi máy:** `machine-revoke <tên>` (khoá bị từ chối sau tối đa 30 giây; tên vẫn bị giữ chỗ). `machines` để xem danh sách.
-- **Thêm/sửa/xoá topic sau này:** `topic-add [project] <thread_id>` (không có project thì lấy tên thư mục hiện tại), `topic-remove [project]`, `topics`. Không cần sửa env hay redeploy.
-- Các lệnh admin **không** nằm trong `/notify` (cần khoá bí mật).
-- Test relay cục bộ: `cd relay; npm install; node --test` (Node ≥ 18, không cần mạng hay Atlas). `<project>` là **tên thư mục** của project.
-
-**Bật/tắt tạm thời** (gõ trong Claude Code hoặc terminal):
-
-| Muốn | Lệnh trong Claude Code | Lệnh terminal |
+| Muốn | Trong Claude Code | Trong terminal |
 | --- | --- | --- |
 | Tắt tất cả 30 phút / 1 / 4 / 8 giờ | `/notify snooze 30m` (`1h`, `4h`, `8h`) | `& "$HOME\.claude\notify-ctl.cmd" snooze 1h` |
-| Chỉ tắt kênh điện thoại/Telegram (toast vẫn hiện) | `/notify snooze 4h telegram` | `... snooze 4h telegram` |
+| Chỉ tắt tin điện thoại (toast vẫn hiện) | `/notify snooze 4h telegram` | `... snooze 4h telegram` |
 | Chỉ tắt toast | `/notify snooze 1h toast` | `... snooze 1h toast` |
 | Bật lại ngay | `/notify on` | `... on` |
 | Xem trạng thái / gửi thử | `/notify status` / `/notify test` | `... status` / `... test` |
 
-Tinh chỉnh lâu dài (bật/tắt từng kênh hoặc từng loại sự kiện, đổi ngưỡng 60 giây) trong `hooks/notify.config.json`.
+**Khi đã bật Telegram, các việc thường làm** (chạy trong terminal; các lệnh này xử lý khoá bí mật nên không có trong `/notify`):
 
-**Cấu trúc file cài đặt:**
+| Việc | Lệnh |
+| --- | --- |
+| Nối máy này vào relay (máy admin, một lần) | `notify-ctl.cmd admin-setup` rồi `notify-ctl.cmd machine-add <tên-máy> -Apply` |
+| Thêm máy khác | trên máy admin `notify-ctl.cmd machine-add <tên>` (khoá chỉ hiện **một lần**), trên máy mới `notify-ctl.cmd relay-setup` |
+| Thu hồi một máy | `notify-ctl.cmd machine-revoke <tên>` (xem danh sách: `notify-ctl.cmd machines`) |
+| Cho một project có topic riêng | trong thư mục project: `notify-ctl.cmd topic-add <id-topic>` (xem: `notify-ctl.cmd topics`) |
 
-- `install.cmd` — chỉ là launcher một dòng, tự truyền `-ExecutionPolicy Bypass` để chạy được trên máy mới dù PowerShell đang chặn script.
-- `install.ps1` — toàn bộ logic cài đặt.
-- `hooks/notify.ps1` — bộ điều phối hook; `hooks/channels/` — mỗi kênh (`toast.ps1`, `relay.ps1`) một file, thêm kênh mới chỉ cần thêm file; `hooks/channels/relay-admin.ps1` — gọi API admin của relay; `hooks/notify-ctl.ps1` — snooze/status/relay-setup/admin-setup/machine-*/topic-*; `hooks/notify.config.json` — cấu hình; `hooks/claude-logo.png` — logo toast; `relay/` — relay Vercel serverless (`api/notify.js` nhận tin, `api/admin.js` quản trị máy/topic, `lib/db.js` + `lib/store.js` lưu trữ MongoDB, `test/` gồm test và DB giả). `~/.claude/notify-ctl.cmd` do `install.cmd -Notify` sinh ra theo từng máy (không commit).
+(`notify-ctl.cmd` đầy đủ là `& "$HOME\.claude\notify-ctl.cmd"`.) Thêm máy hay topic **không cần** sửa biến môi trường hay deploy lại.
 
-> Trên Windows **không dùng `ln -s`**: Git Bash mặc định chỉ copy file chứ không tạo link thật.
-
-**Vì sao dùng symlink thay vì copy hay clone thẳng:**
-
-- Symlink → sửa file trong `~/claude-code-setup/` (qua `git pull` hoặc sửa tay) thì `~/.claude/` tự động thấy ngay, không cần copy lại thủ công.
-- Copy thường → dễ quên đồng bộ lại, dễ lệch giữa 2 nơi.
-- Clone thẳng vào `~/.claude/` → rủi ro đè mất file hệ thống khác đang nằm chung thư mục.
-
-**Khi cài máy mới:** chỉ cần lặp lại đúng 2 bước trên (clone vào thư mục riêng + chạy `install`) là khôi phục lại toàn bộ hệ thống, không mất gì.
-
-**Khi thêm/sửa command mới (theo Mục 5):** sửa trực tiếp trong `~/claude-code-setup/`, rồi `git add . && git commit && git push` như bình thường — vì đã symlink, `~/.claude/` nhận thay đổi ngay lập tức, không cần thao tác gì thêm.
-
-**Lưu ý quan trọng:** CLAUDE.md **riêng của từng project** (sinh ra bởi `/project-init`) là file khác — nó nằm trong chính repo của project đó, commit chung với code, **không** đưa vào repo `claude-code-setup` này.
+**Không thấy thông báo?** Tắt *Focus Assist / Do Not Disturb* của Windows và mở session Claude Code mới. Các nguyên nhân khác và cách xử lý nằm ở [docs/PROJECT.md, mục 8](docs/PROJECT.md#8-xử-lý-sự-cố). Tinh chỉnh lâu dài (tắt hẳn một loại sự kiện, đổi ngưỡng 60 giây) trong `hooks/notify.config.json`.
 
 ---
 
