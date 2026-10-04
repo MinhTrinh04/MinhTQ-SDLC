@@ -86,9 +86,10 @@ Sau khi chạy xong, **mở session Claude Code mới** (hook và skill chỉ đ
 **Phần Notify** — hiện toast Windows (kèm logo Claude) bằng module BurntToast:
 
 - Cài BurntToast cho user hiện tại nếu chưa có (cần internet).
-- Gộp 3 hook vào `~/.claude/settings.json`, **giữ nguyên mọi setting khác** và tự backup thành `settings.json.bak`:
+- Gộp 4 hook vào `~/.claude/settings.json`, **giữ nguyên mọi setting khác** và tự backup thành `settings.json.bak`:
   - `Stop` → toast "Tác vụ đã hoàn thành!" khi Claude làm xong.
   - `Notification` → toast kèm thông điệp khi Claude cần bạn cấp quyền hoặc đang chờ trả lời.
+  - `UserPromptSubmit` → không hiện gì, chỉ ghi lại giờ bắt đầu lượt để `Stop` biết lượt dài hay ngắn.
   - `PreToolUse` (chỉ với `AskUserQuestion`) → toast hiện câu hỏi và các lựa chọn khi Claude cần bạn quyết định (ví dụ cổng duyệt của `/flow`).
 - Hook trỏ thẳng vào `hooks\notify.ps1` trong repo (đường dẫn được tính lúc cài). Nếu **di chuyển repo** sang chỗ khác thì chạy lại `.\install.cmd -Notify`.
 - Logo toast là `hooks\claude-logo.png`; muốn đổi logo chỉ cần thay file này.
@@ -96,11 +97,43 @@ Sau khi chạy xong, **mở session Claude Code mới** (hook và skill chỉ đ
 - Gỡ lỗi: đặt biến môi trường `CLAUDE_NOTIFY_DEBUG=1` để ghi mọi payload hook vào `%TEMP%\claude-notify-debug.log`.
 - Nếu không thấy toast: tắt **Focus Assist / Do Not Disturb** trong Windows Settings. Bell âm thanh trong VS Code là tuỳ chọn, bật bằng `terminal.integrated.enableBell: true`.
 
+#### Thông báo Telegram (group có Topics, mỗi project một topic)
+
+Tin được gửi bằng bot vào **một supergroup bật Topics**; bot tự tạo topic theo tên thư mục project ở lần gửi đầu tiên.
+
+| Sự kiện | Nội dung tin Telegram |
+| --- | --- |
+| Claude hỏi bạn chọn phương án (`AskUserQuestion`) | `Claude cần bạn đưa ra quyết định ở <project>` |
+| Claude xin quyền / chờ lâu (`Notification`) | `Claude đang chờ bạn ở <project>` |
+| Claude làm xong (`Stop`) | `Claude đã xong ở <project> (x phút y giây)` — **chỉ gửi nếu lượt chạy ≥ 60 giây** |
+
+Tin cố ý chung chung: không gửi code, đường dẫn hay nội dung câu hỏi ra ngoài máy. Toast trên máy vẫn hiện đầy đủ chi tiết.
+
+**Cài đặt một lần** (cần làm trước trên Telegram: chat với `@BotFather` → `/newbot` lấy token; tạo supergroup, bật *Topics*, thêm bot làm **admin** có quyền *Manage Topics*; gửi một tin bất kỳ trong group):
+
+```powershell
+& "$HOME\.claude\notify-ctl.cmd" telegram-setup
+```
+
+Script hỏi token (không hiện trên màn hình), tự tìm group, rồi lưu vào `~/.claude/notify.telegram.json`. Token được **mã hoá theo tài khoản Windows (DPAPI)** và file này **nằm ngoài repo** — không bao giờ commit, không cần dán token vào chat.
+
+**Bật/tắt tạm thời** (gõ trong Claude Code hoặc terminal):
+
+| Muốn | Lệnh trong Claude Code | Lệnh terminal |
+| --- | --- | --- |
+| Tắt tất cả 30 phút / 1 / 4 / 8 giờ | `/notify snooze 30m` (`1h`, `4h`, `8h`) | `& "$HOME\.claude\notify-ctl.cmd" snooze 1h` |
+| Chỉ tắt Telegram (toast vẫn hiện) | `/notify snooze 4h telegram` | `... snooze 4h telegram` |
+| Chỉ tắt toast | `/notify snooze 1h toast` | `... snooze 1h toast` |
+| Bật lại ngay | `/notify on` | `... on` |
+| Xem trạng thái / gửi thử | `/notify status` / `/notify test` | `... status` / `... test` |
+
+Tinh chỉnh lâu dài (bật/tắt từng kênh hoặc từng loại sự kiện, đổi ngưỡng 60 giây) trong `hooks/notify.config.json`.
+
 **Cấu trúc file cài đặt:**
 
 - `install.cmd` — chỉ là launcher một dòng, tự truyền `-ExecutionPolicy Bypass` để chạy được trên máy mới dù PowerShell đang chặn script.
 - `install.ps1` — toàn bộ logic cài đặt.
-- `hooks/notify.ps1` + `hooks/claude-logo.png` — script và logo của toast.
+- `hooks/notify.ps1` — bộ điều phối hook; `hooks/channels/` — mỗi kênh (`toast.ps1`, `telegram.ps1`) một file, thêm kênh mới chỉ cần thêm file; `hooks/notify-ctl.ps1` — snooze/status/setup; `hooks/notify.config.json` — cấu hình; `hooks/claude-logo.png` — logo toast. `~/.claude/notify-ctl.cmd` do `install.cmd -Notify` sinh ra theo từng máy (không commit).
 
 > Trên Windows **không dùng `ln -s`**: Git Bash mặc định chỉ copy file chứ không tạo link thật.
 

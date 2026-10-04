@@ -55,7 +55,7 @@ function Add-Link($link, $target) {
 
 $notifyScript = Join-Path $repo 'hooks\notify.ps1'
 $hookCommand  = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$notifyScript`""
-$hookEvents   = 'Stop', 'Notification', 'PreToolUse'
+$hookEvents   = 'Stop', 'Notification', 'PreToolUse', 'UserPromptSubmit'
 $hookMatchers = @{ PreToolUse = 'AskUserQuestion' }   # PreToolUse only fires for the human-decision tool
 
 function Test-NotifyEntry($entry) {
@@ -111,6 +111,19 @@ function Register-ToastApp([bool]$Add) {
     Write-Host 'REG    toast app Claude.Code.Notify'
 }
 
+# ~/.claude/notify-ctl.cmd: machine-specific shim (holds this clone's path) so /notify and the README can call
+# hooks\notify-ctl.ps1 without knowing where the repo lives. Not committed; rewritten on every install.
+function Write-NotifyShim([bool]$Add) {
+    $shim = Join-Path $claude 'notify-ctl.cmd'
+    if (-not $Add) {
+        if (Test-Path $shim) { Remove-Item $shim -Force; Write-Host "UNLINK $shim" }
+        return
+    }
+    $line = "@powershell -NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $repo 'hooks\notify-ctl.ps1')`" %*"
+    [IO.File]::WriteAllText($shim, "$line`r`n", (New-Object Text.ASCIIEncoding))
+    Write-Host "SHIM   $shim"
+}
+
 function Install-BurntToast {
     if (Get-Module -ListAvailable BurntToast) { Write-Host 'OK     BurntToast'; return }
     try {
@@ -140,7 +153,7 @@ if ($Uninstall) {
                 ForEach-Object { Remove-Link $_.FullName }
         }
     }
-    if ($doNotify) { Update-NotifyHooks $false; Register-ToastApp $false }
+    if ($doNotify) { Update-NotifyHooks $false; Register-ToastApp $false; Write-NotifyShim $false }
     return
 }
 
@@ -159,6 +172,7 @@ if ($doNotify) {
     if (-not (Test-Path -LiteralPath $notifyScript)) { throw "Missing $notifyScript - did you commit hooks/notify.ps1?" }
     Install-BurntToast
     Register-ToastApp $true
+    Write-NotifyShim $true
     Update-NotifyHooks $true
 }
 Write-Host "`nDone. Open a new Claude Code session to pick up the changes."
