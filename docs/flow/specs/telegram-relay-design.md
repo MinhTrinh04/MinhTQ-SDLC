@@ -130,3 +130,101 @@ Khối "telegram" gọi `Send-Relay` thay cho `Send-Telegram`. Giữ nguyên log
 - **Lộ khoá của một máy:** đổi/xoá khoá đó trong `NOTIFY_KEYS` trên Vercel rồi redeploy; các máy khác không bị ảnh hưởng.
 - **Gói Vercel miễn phí** dành cho mục đích phi thương mại; dùng cho công việc công ty cần xem lại điều khoản.
 - **Mất tính năng:** không còn Telegram nếu relay chưa deploy hoặc Vercel sập (toast vẫn hoạt động). Đây là hệ quả của việc người dùng yêu cầu xoá đường gọi trực tiếp.
+
+---
+
+## 9. Bổ sung (2026-10-04): lưu khoá máy và bản đồ topic trong MongoDB
+
+> Phân loại: **Architectural** (lớp lưu trữ mới, endpoint admin mới, đổi cách xác thực, nhóm lệnh quản trị mới ở client).
+> Mục này **thay thế** các phần sau của thiết kế ở trên: 4.3 (biến môi trường `NOTIFY_KEYS`, `NOTIFY_TOPICS`), 4.4 (xác thực theo danh sách khoá trong env) và 4.6b (tra topic từ env). Các phần còn lại (hợp đồng `POST /api/notify`, rate limit, validate, retry khi topic cũ, client `Send-Relay`, snooze) giữ nguyên.
+
+### 9.1 Mục tiêu
+Thêm **máy mới** hoặc **topic mới** mà **không phải sửa biến môi trường Vercel và không redeploy**. Biến môi trường chỉ đặt một lần: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `MONGODB_URI`, `NOTIFY_ADMIN_KEY`. Dữ liệu thay đổi thường xuyên (khoá máy, map topic) sống trong MongoDB Atlas (gói miễn phí M0). Bot token vẫn ở env, không đưa vào DB. Vì chưa deploy nên **không cần migration**; bỏ hẳn hỗ trợ `NOTIFY_KEYS`/`NOTIFY_TOPICS`.
+
+### 9.2 Các phương án đã cân nhắc
+| | Mô tả | Ưu | Nhược |
+|---|---|---|---|
+| **A. Mongo + endpoint admin (chọn)** | Backend tra khoá/topic trong Mongo; quản trị qua `POST /api/admin` có khoá admin riêng; `notify-ctl` gọi endpoint này | Khoá riêng theo máy, thu hồi được, thêm máy/topic bằng một lệnh, `MONGODB_URI` chỉ nằm trên Vercel | Thêm dịch vụ, thêm dependency, thêm bề mặt tấn công (endpoint admin) |
+| B. Client truy cập thẳng Mongo | `notify-ctl` kết nối Mongo trực tiếp | Không cần endpoint admin | PowerShell không có driver Mongo; `MONGODB_URI` phải nằm trên mọi máy — **loại** |
+| C. Giữ env JSON (hiện trạng) | Sửa env + redeploy mỗi lần thêm | Đơn giản nhất | Đúng cái người dùng muốn tránh — **loại** |
+
+(Upstash Redis đã được cân nhắc và người dùng chọn MongoDB.)
+
+### 9.3 Kiến trúc
+```
+máy ──POST /api/notify (Bearer khoá máy)──► backend
+        sha256(khoá) → machines.findOne({keyHash, revoked:false})        [cache 30 giây]
+        topics.findOne({_id: project}) ?? topics.findOne({_id:'_default'}) [cache 30 giây]
+        → Telegram sendMessage (bot token từ env)
+
+máy admin ──POST /api/admin (Bearer NOTIFY_ADMIN_KEY) {action,...}──► backend ──► MongoDB
+```
+
+### 9.4 Dữ liệu (database `claude_notify`, tên đổi được bằng env tuỳ chọn `MONGODB_DB`)
+- `machines`: `{ _id: <name>, keyHash: <hex SHA-256>, createdAt: <Date>, revoked: <bool>, revokedAt?: <Date> }`. `name` khớp `^[a-z0-9][a-z0-9_-]{0,31}$`. Chỉ lưu **băm**, không lưu khoá thật. Chỉ mục duy nhất trên `keyHash`.
+- `topics`: `{ _id: <project>, threadId: <int 1..2147483647> }`. Project đặc biệt `_default` là topic mặc định cho project chưa map.
+- Chỉ mục tạo idempotent (`createIndex`) ở lần kết nối đầu của mỗi instance.
+- Khoá máy sinh phía server: 32 byte ngẫu nhiên (`crypto.randomBytes`) mã hoá base64url (43 ký tự).
+
+### 9.5 Backend `relay/`
+**File mới/đổi:**
+- `relay/lib/db.js` — `getDb()` giữ `MongoClient` trong biến module (cache giữa các lần gọi serverless), tuỳ chọn `maxPoolSize: 3`, `serverSelectionTimeoutMS: 3000`, `connectTimeoutMS: 3000`; `_setDb(fake)` để test chèn DB giả; không bao giờ log `MONGODB_URI`.
+- `relay/lib/store.js` — các hàm `findMachineByKeyHash`, `findTopic`, `addMachine`, `revokeMachine`, `listMachines`, `setTopic`, `removeTopic`, `listTopics`. Cache bộ nhớ TTL 30 giây (đồng hồ có thể chèn để test): chỉ cache kết quả **tìm thấy** của khoá máy (không cache kết quả "không có" để kẻ tấn công không làm phình bộ nhớ bằng băm tuỳ ý); topic cache cả có/không, tối đa 500 mục (vượt thì xoá cache). Ghi từ admin xoá cache cùng instance (best-effort).
+- `relay/api/notify.js` — bỏ `loadConfig` JSON và `authenticate` theo danh sách env. Cấu hình bắt buộc: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `MONGODB_URI` (thiếu → 500 `{error:'not configured'}`). Thứ tự kiểm tra: 405 → 500 → 401 (băm khoá, tra DB) → 429 → 400 → gửi Telegram. Lỗi DB khi tra khoá → **503** `{error:'storage unavailable'}` (fail closed, không có đường dự phòng bằng env). Tin vẫn nối ` · <tên máy>` lấy từ `machines._id`.
+- `relay/api/admin.js` — `POST` duy nhất, `Authorization: Bearer <NOTIFY_ADMIN_KEY>`; `NOTIFY_ADMIN_KEY` phải dài ≥ 32 ký tự (ngắn hơn → 500 `not configured`); so sánh bằng băm SHA-256 + `crypto.timingSafeEqual`. Body `{ "action": "...", ... }`:
+
+  | action | tham số | kết quả |
+  |---|---|---|
+  | `machine-add` | `name` | 200 `{name, key}` — **khoá chỉ hiện đúng một lần**; tên đã có → 409 |
+  | `machine-revoke` | `name` | 200 hoặc 404; đặt `revoked:true` (tên vẫn bị giữ chỗ) |
+  | `machine-list` | — | `[{name, createdAt, revoked}]`, không bao giờ trả băm |
+  | `topic-add` | `project`, `threadId` | upsert; 200 |
+  | `topic-remove` | `project` | 200 hoặc 404 |
+  | `topic-list` | — | `[{project, threadId}]` |
+
+- Giới hạn tần suất riêng cho admin: 10 request/phút/instance, và đếm cả lần xác thực **sai** (20 lần/phút/instance → 429) để làm chậm dò khoá.
+- `relay/package.json`: thêm dependency `mongodb` (một phiên bản chính cố định); `engines` giữ `node >=18`.
+- Validate đầu vào dùng lại hàm làm sạch hiện có: `project` 1..100 ký tự không có ký tự điều khiển/xuống dòng; `threadId` là số nguyên 1..2147483647; `name` theo regex ở 9.4.
+- **Chống NoSQL injection:** mọi giá trị đưa vào truy vấn phải là `string` hoặc `number` đã kiểm kiểu; từ chối (400) nếu là object/mảng; truy vấn chỉ dùng so khớp bằng, không bao giờ nhận toán tử `$...` từ đầu vào.
+- Nhật ký: chỉ `action`, tên máy, project, mã trạng thái; không log khoá, băm, `MONGODB_URI`, bot token hay nội dung tin.
+
+**Về "so sánh an toàn":** khoá máy là chuỗi ngẫu nhiên 256 bit; backend tra theo **băm** qua chỉ mục duy nhất, nên thời gian truy vấn không cho kẻ tấn công thông tin dùng được (không thể chọn băm từng phần mà không có tiền ảnh). Riêng khoá admin (một giá trị trong env) vẫn so bằng `timingSafeEqual`.
+
+### 9.6 Client
+- `hooks/channels/relay-admin.ps1` (mới, chỉ ASCII): `Get-AdminConfig`, `Save-AdminConfig`, `Invoke-RelayAdmin -Action -Params`. Cấu hình ở `~/.claude/notify.admin.json` = `{ "url": ".../api/admin", "key_enc": "<DPAPI>" }` (ngoài repo, không commit). Timeout 10 giây, `-MaximumRedirection 0`, cắt khoảng trắng của khoá, không bao giờ in khoá admin.
+- `hooks/notify-ctl.ps1` thêm lệnh (giữ `relay-setup` cho máy thường):
+  - `admin-setup [-Url <url>]` — hỏi URL admin và khoá admin (ẩn), lưu DPAPI.
+  - `machine-add <tên> [-Apply]` — gọi admin, **in khoá đúng một lần** kèm nhắc chạy `relay-setup` trên máy mới; `-Apply` ghi luôn khoá vào `notify.relay.json` của máy hiện tại (URL relay suy ra từ URL admin) để khỏi sao chép tay.
+  - `machine-revoke <tên>`, `machines`.
+  - `topic-add [project] <thread_id>` (không có project thì lấy tên thư mục hiện tại; `_default` hợp lệ), `topic-remove [project]`, `topics`.
+- `commands/notify.md`: các lệnh admin **không** nằm trong `/notify` (cần khoá bí mật); quy tắc cấm đọc/in khoá mở rộng sang khoá admin.
+- `hooks/channels/relay.ps1` và `notify.ps1` **không đổi** (vẫn `Send-Relay`).
+
+### 9.7 Phân tích bảo mật
+| Mối đe doạ | Biện pháp |
+|---|---|
+| Dò khoá admin | Khoá ≥ 32 ký tự ngẫu nhiên, timing-safe, giới hạn cả lần sai, phản hồi lỗi chung |
+| Lộ `MONGODB_URI` | Chỉ ở env Vercel; user DB chỉ có quyền `readWrite` trên một database; mật khẩu mạnh; xoay mật khẩu được |
+| Atlas Network Access mở `0.0.0.0/0` (gói miễn phí/Vercel không có IP cố định) | Chấp nhận có chủ đích, bù bằng: TLS bắt buộc, mật khẩu mạnh, user DB quyền tối thiểu, DB chỉ chứa băm và id topic. Ghi rõ trong README |
+| DB bị lộ | Chỉ có băm SHA-256 của khoá 256 bit và id topic: không dùng được để giả máy |
+| Thu hồi khoá chậm | Tối đa 30 giây (TTL cache), chấp nhận được; chỉnh bằng hằng số |
+| Cụm Atlas/DB sập | Fail closed (503); toast trên máy vẫn hoạt động |
+| NoSQL injection | Kiểm kiểu chặt, không nhận toán tử từ đầu vào (9.5) |
+| Spam tạo máy qua admin | Chỉ khoá admin tạo được; rate limit admin |
+
+### 9.8 Kiểm thử
+- **Backend (`node --test`, DB giả trong bộ nhớ, `fetch` giả, không cần mạng):** DB giả cài tối thiểu `findOne`, `insertOne`, `updateOne`/upsert, `deleteOne`, `find().toArray()`, `createIndex`; chèn bằng `db._setDb()`. Các ca: xác thực qua DB (khoá đúng, sai, bị thu hồi); cache 30 giây (đồng hồ giả: thu hồi trễ tối đa 30 giây, không cache kết quả "không có" của khoá); topic map/`_default`/không có; DB ném lỗi → 503; thiếu `MONGODB_URI` → 500; admin: sai/thiếu khoá → 401, rate limit lần sai → 429, từng action (machine-add trả khoá một lần và trong DB chỉ có băm, 409 khi trùng tên, revoke, list không lộ băm, topic add/remove/list); validate gồm payload NoSQL-injection (`{"$ne":null}`, mảng) → 400; khoá/băm/`MONGODB_URI`/bot token không bao giờ xuất hiện trong response hay log. Các test cũ của `notify.js` được cập nhật sang cấu hình DB giả.
+- **Client (HOME giả + server admin giả):** `admin-setup` lưu DPAPI và không để khoá dạng chữ; `machine-add` in khoá một lần, `-Apply` tạo `notify.relay.json` đúng; `machine-revoke`, `machines`, `topic-add/remove`, `topics`; lệnh admin khi chưa `admin-setup` báo rõ; `~/.claude` thật không bị ghi.
+- **Kiểm tra tay sau khi bạn tạo cluster Atlas:** `machine-add`, `relay-setup`, `test`, `topic-add`, thu hồi khoá và xác nhận tin bị từ chối sau tối đa 30 giây.
+
+### 9.9 Danh sách xoá/thay
+- Xoá: `loadConfig` đọc `NOTIFY_KEYS`/`NOTIFY_TOPICS`, `authenticate` theo danh sách env, các test dựa vào hai biến đó, và phần README nói về chúng.
+- Thay bằng: `lib/db.js`, `lib/store.js`, `api/admin.js`, `relay-admin.ps1`, các lệnh `notify-ctl` mới, hướng dẫn Atlas trong README.
+- README cần: tạo cluster Atlas M0, tạo user DB quyền tối thiểu, Network Access cho Vercel, bộ env một lần, quy trình `admin-setup` → `machine-add` → `relay-setup` (máy mới) → `topic-add`.
+
+### 9.10 Rủi ro & đánh đổi
+- **Độ trễ:** thêm một lượt truy vấn DB cho tin đầu tiên của mỗi instance (cache 30 giây giảm các tin sau); driver `mongodb` làm cold start chậm hơn (kiểm tra lại timeout 10 giây của client).
+- **Giới hạn kết nối:** `maxPoolSize` nhỏ và client được cache để không làm tràn số kết nối của Atlas M0.
+- **Cluster miễn phí có thể bị tạm dừng khi lâu không dùng** (cần xem chính sách hiện hành của Atlas); khi đó tin điện thoại ngừng cho đến khi bật lại, toast vẫn chạy.
+- **Thêm một dịch vụ phải vận hành** và thêm một credential quan trọng (`MONGODB_URI`) cùng một khoá admin.
+- **Ngoài phạm vi:** bot tự tạo topic, giao diện web quản trị, tự xoay khoá, nhật ký kiểm toán.
