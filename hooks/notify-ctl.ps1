@@ -3,7 +3,11 @@
 #   notify-ctl.cmd on                                           cancel the snooze
 #   notify-ctl.cmd status                                       show snooze + Telegram state
 #   notify-ctl.cmd test                                         send a test notification to every enabled channel
-#   notify-ctl.cmd telegram-setup [-ChatId <id>]                one-time: connect the bot (token is asked, never echoed)
+#   notify-ctl.cmd telegram-setup [-ChatId <id>]                one-time per machine: connect the bot (token is asked, never echoed)
+#   notify-ctl.cmd topics                                       list the project -> topic map (shared via the repo)
+#   notify-ctl.cmd topic-detect [project]                       map a project to the topic you just posted a message in
+#   notify-ctl.cmd topic-add [project] <thread_id>              map a project to a topic id by hand (project defaults to this folder)
+#   notify-ctl.cmd topic-remove [project]                       forget a mapping
 param(
     [Parameter(Position = 0)][string]$Command = 'status',
     [Parameter(Position = 1)][string]$Arg1,
@@ -32,8 +36,7 @@ function Show-Status {
     } else { Write-Host 'Snooze: khong (thong bao dang bat)' }
     $tg = Get-TgConfig
     if ($tg) {
-        $n = if ($tg.PSObject.Properties['topics']) { @($tg.topics.PSObject.Properties).Count } else { 0 }
-        Write-Host "Telegram: da ket noi (chat_id $($tg.chat_id), $n topic)"
+        Write-Host "Telegram: da ket noi (chat_id $($tg.chat_id), $((Get-TgTopics).Count) topic da map)"
     } else { Write-Host 'Telegram: chua ket noi - chay: notify-ctl.cmd telegram-setup' }
 }
 
@@ -58,16 +61,18 @@ switch ($Command) {
         . (Join-Path $PSScriptRoot 'channels\toast.ps1')
         try { Send-Toast -Title "Claude Code - $project" -Body 'Thong bao thu (toast)' ; Write-Host 'toast: da gui' } catch { Write-Host "toast: loi $_" }
         if (Get-TgConfig) {
-            if (Send-Telegram -Text "Thong bao thu tu $project" -Project $project) { Write-Host 'telegram: da gui' } else { Write-Host 'telegram: GUI LOI (kiem tra mang/bot co la admin & co quyen Manage Topics khong)' }
+            if (Send-Telegram -Text "Thong bao thu tu $project" -Project $project) { Write-Host 'telegram: da gui' } else { Write-Host 'telegram: GUI LOI (kiem tra mang/bot co la admin cua group khong)' }
         } else { Write-Host 'telegram: chua ket noi' }
     }
     'telegram-setup' {
         Write-Host @'
-Truoc khi tiep tuc, can co (lam 1 lan tren dien thoai/Telegram):
-  1. Chat voi @BotFather -> /newbot -> dat ten -> nhan token.
-  2. Tao 1 SUPERGROUP moi (vd: "Claude"), bat "Topics" trong Group Settings.
-  3. Them bot vao group va cap quyen ADMIN (bat "Manage Topics").
-  4. Gui 1 tin nhan bat ky trong group.
+Truoc khi tiep tuc, can co (lam 1 lan tren Telegram, may khac dung lai cung bot + group):
+  1. Chat voi @BotFather -> /newbot -> dat ten -> nhan token (quen thi /token).
+  2. Tao 1 SUPERGROUP (vd: "Claude"), bat "Topics" trong Group Settings.
+  3. Tu tao cac topic (moi project 1 topic) - bot KHONG tu tao topic.
+  4. Them bot vao group va cap quyen ADMIN (de bot doc/gui duoc trong moi topic).
+  5. Gui 1 tin nhan bat ky trong group.
+Sau do map project -> topic bang: notify-ctl.cmd topic-detect <project>
 '@
         $secure = Read-Host 'Dan bot token (se khong hien tren man hinh)' -AsSecureString
         $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
@@ -94,12 +99,46 @@ Truoc khi tiep tuc, can co (lam 1 lan tren dien thoai/Telegram):
         }
 
         $chat = (Invoke-Tg $plain 'getChat' @{ chat_id = $ChatId }).result
-        if (-not $chat.is_forum) { Write-Warning 'Group chua bat Topics: tin se vao chung 1 luong, khong tach theo project. Bat Topics trong Group Settings roi chay lai neu muon tach.' }
+        if (-not $chat.is_forum) { Write-Warning 'Group chua bat Topics: tin se vao chung 1 luong, khong tach theo project. Bat Topics trong Group Settings neu muon tach.' }
 
-        Save-TgConfig ([pscustomobject]@{ chat_id = $ChatId; token_enc = (Protect-TgToken $secure); topics = [pscustomobject]@{} })
+        Save-TgConfig ([pscustomobject]@{ chat_id = $ChatId; token_enc = (Protect-TgToken $secure) })
         $plain = $null
         Write-Host "Da luu cau hinh vao $script:TgFile (token ma hoa theo tai khoan Windows, KHONG nam trong repo)."
-        if (Send-Telegram -Text 'Da ket noi Claude Code notify.' -Project 'setup') { Write-Host 'Da gui tin thu vao group.' } else { Write-Warning 'Gui tin thu that bai - kiem tra bot co la admin va quyen Manage Topics.' }
+        if (Send-Telegram -Text 'Da ket noi Claude Code notify.' -Project 'setup') { Write-Host 'Da gui tin thu vao group (topic General neu chua map).' } else { Write-Warning 'Gui tin thu that bai - kiem tra bot co la admin cua group.' }
     }
-    default { Write-Host "Lenh khong ro: $Command. Dung: snooze | on | status | test | telegram-setup"; exit 1 }
+    'topics' {
+        $t = Get-TgTopics
+        if (-not $t.Count) { Write-Host 'Chua map topic nao. Dung: topic-detect <project> hoac topic-add <project> <thread_id>' }
+        foreach ($k in $t.Keys) { Write-Host ("{0,-30} -> topic {1}" -f $k, $t[$k]) }
+        Write-Host "(file: $script:TopicsFile - commit file nay de cac may dung chung)"
+    }
+    'topic-add' {
+        # topic-add <thread_id>  (project = this folder)   |   topic-add <project> <thread_id>
+        if ($Arg1 -match '^\d+$' -and -not $Arg2) { $project = Split-Path (Get-Location).Path -Leaf; $id = $Arg1 } else { $project = $Arg1; $id = $Arg2 }
+        if (-not $project -or $id -notmatch '^\d+$') { Write-Host 'Dung: topic-add [project] <thread_id>   (thread_id la so)'; exit 1 }
+        $t = Get-TgTopics; $t[$project] = [int]$id; Save-TgTopics $t
+        Write-Host "Da map $project -> topic $id"
+    }
+    'topic-remove' {
+        $project = if ($Arg1) { $Arg1 } else { Split-Path (Get-Location).Path -Leaf }
+        $t = Get-TgTopics
+        if ($t.Contains($project)) { $t.Remove($project); Save-TgTopics $t; Write-Host "Da bo map $project" } else { Write-Host "Khong co map cho $project" }
+    }
+    'topic-detect' {
+        $project = if ($Arg1) { $Arg1 } else { Split-Path (Get-Location).Path -Leaf }
+        $cfg = Get-TgConfig
+        if (-not $cfg) { Write-Host 'Chua ket noi Telegram - chay telegram-setup truoc.'; exit 1 }
+        Write-Host "Hay gui 1 tin nhan bat ky VAO TOPIC cua project '$project' tren Telegram, roi nhan Enter."
+        Read-Host | Out-Null
+        $up = Invoke-Tg (Unprotect-TgToken $cfg.token_enc) 'getUpdates' @{ timeout = 0 }
+        $hit = $null
+        foreach ($u in $up.result) {
+            $m = $u.message
+            if ($m -and [string]$m.chat.id -eq [string]$cfg.chat_id -and $m.message_thread_id) { $hit = $m }
+        }
+        if (-not $hit) { Write-Host 'Khong thay tin nao trong topic (bot phai la admin; tin phai gui trong vong 24h, KHONG phai o topic General). Thu lai hoac dung topic-add.'; exit 1 }
+        $t = Get-TgTopics; $t[$project] = [int]$hit.message_thread_id; Save-TgTopics $t
+        Write-Host "Da map $project -> topic $($hit.message_thread_id)"
+    }
+    default { Write-Host "Lenh khong ro: $Command. Dung: snooze | on | status | test | telegram-setup | topics | topic-add | topic-detect | topic-remove"; exit 1 }
 }

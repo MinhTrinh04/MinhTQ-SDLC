@@ -99,7 +99,7 @@ Sau khi chạy xong, **mở session Claude Code mới** (hook và skill chỉ đ
 
 #### Thông báo Telegram (group có Topics, mỗi project một topic)
 
-Tin được gửi bằng bot vào **một supergroup bật Topics**; bot tự tạo topic theo tên thư mục project ở lần gửi đầu tiên.
+Tin được gửi bằng bot vào **một supergroup bật Topics**. **Bạn tự tạo topic** cho từng project; bot chỉ gửi vào topic đã có, không tự tạo. Project nào chưa được map với topic thì tin rơi vào topic *General* của group (không bị mất).
 
 | Sự kiện | Nội dung tin Telegram |
 | --- | --- |
@@ -109,13 +109,24 @@ Tin được gửi bằng bot vào **một supergroup bật Topics**; bot tự t
 
 Tin cố ý chung chung: không gửi code, đường dẫn hay nội dung câu hỏi ra ngoài máy. Toast trên máy vẫn hiện đầy đủ chi tiết.
 
-**Cài đặt một lần** (cần làm trước trên Telegram: chat với `@BotFather` → `/newbot` lấy token; tạo supergroup, bật *Topics*, thêm bot làm **admin** có quyền *Manage Topics*; gửi một tin bất kỳ trong group):
+**Cài đặt một lần cho mỗi máy** (cần làm trước trên Telegram, các máy sau dùng lại **cùng bot và cùng group**: chat với `@BotFather` → `/newbot` lấy token — quên thì gõ `/token`; tạo supergroup, bật *Topics*, tự tạo các topic; thêm bot làm **admin**; gửi một tin bất kỳ trong group):
 
 ```powershell
 & "$HOME\.claude\notify-ctl.cmd" telegram-setup
 ```
 
-Script hỏi token (không hiện trên màn hình), tự tìm group, rồi lưu vào `~/.claude/notify.telegram.json`. Token được **mã hoá theo tài khoản Windows (DPAPI)** và file này **nằm ngoài repo** — không bao giờ commit, không cần dán token vào chat.
+Script hỏi token (không hiện trên màn hình), tự tìm group, rồi lưu vào `~/.claude/notify.telegram.json`. Token được **mã hoá theo tài khoản Windows (DPAPI)** nên **không copy sang máy khác được** — mỗi máy chạy `telegram-setup` một lần với cùng token. File này **nằm ngoài repo**, không bao giờ commit, không cần dán token vào chat. Máy mới không tự dò lại được group (Telegram chỉ giữ cập nhật ~24 giờ): lấy `chat_id` bằng `notify-ctl.cmd status` trên máy cũ rồi chạy `telegram-setup -ChatId <chat_id>`.
+
+**Map project → topic** (dữ liệu không bí mật, nằm trong repo `hooks/notify.topics.json` nên **commit để mọi máy dùng chung**):
+
+| Muốn | Lệnh |
+| --- | --- |
+| Map project theo tin bạn vừa gửi vào topic đó (bot phải là admin) | `notify-ctl.cmd topic-detect <project>` rồi gửi 1 tin vào topic, nhấn Enter |
+| Map thủ công bằng số topic (`message_thread_id`) | `notify-ctl.cmd topic-add <project> <thread_id>` |
+| Xem / bỏ map | `notify-ctl.cmd topics` / `notify-ctl.cmd topic-remove <project>` |
+| Topic mặc định cho project chưa map | `notify-ctl.cmd topic-add _default <thread_id>` |
+
+`<project>` là **tên thư mục** của project (không có tham số thì lấy thư mục đang đứng). Lệnh đầy đủ: `& "$HOME\.claude\notify-ctl.cmd" <lệnh>`.
 
 **Bật/tắt tạm thời** (gõ trong Claude Code hoặc terminal):
 
@@ -133,7 +144,7 @@ Tinh chỉnh lâu dài (bật/tắt từng kênh hoặc từng loại sự kiệ
 
 - `install.cmd` — chỉ là launcher một dòng, tự truyền `-ExecutionPolicy Bypass` để chạy được trên máy mới dù PowerShell đang chặn script.
 - `install.ps1` — toàn bộ logic cài đặt.
-- `hooks/notify.ps1` — bộ điều phối hook; `hooks/channels/` — mỗi kênh (`toast.ps1`, `telegram.ps1`) một file, thêm kênh mới chỉ cần thêm file; `hooks/notify-ctl.ps1` — snooze/status/setup; `hooks/notify.config.json` — cấu hình; `hooks/claude-logo.png` — logo toast. `~/.claude/notify-ctl.cmd` do `install.cmd -Notify` sinh ra theo từng máy (không commit).
+- `hooks/notify.ps1` — bộ điều phối hook; `hooks/channels/` — mỗi kênh (`toast.ps1`, `telegram.ps1`) một file, thêm kênh mới chỉ cần thêm file; `hooks/notify-ctl.ps1` — snooze/status/setup; `hooks/notify.config.json` — cấu hình; `hooks/notify.topics.json` — map project → topic Telegram (commit, dùng chung các máy); `hooks/claude-logo.png` — logo toast. `~/.claude/notify-ctl.cmd` do `install.cmd -Notify` sinh ra theo từng máy (không commit).
 
 > Trên Windows **không dùng `ln -s`**: Git Bash mặc định chỉ copy file chứ không tạo link thật.
 
