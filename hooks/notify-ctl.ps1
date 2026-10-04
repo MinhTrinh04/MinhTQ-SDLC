@@ -109,8 +109,6 @@ switch ($Command) {
         if ($secure.Length -lt 32) { Write-Host 'Khoa phai tu 32 ky tu tro len.'; exit 1 }
         Save-RelayConfig ([pscustomobject]@{ url = $Url; key_enc = (Protect-RelayKey $secure) })
         Write-Host "Da luu cau hinh vao $script:RelayFile (khoa ma hoa theo tai khoan Windows, KHONG nam trong repo)."
-        $old = Join-Path $stateDir 'notify.telegram.json'
-        if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Force; Write-Host 'Da xoa notify.telegram.json cu (bot token khong con dung o may nay).' }
         $project = Split-Path (Get-Location).Path -Leaf
         if (Send-Relay -Text 'Da ket noi Claude Code notify.' -Project $project) { Write-Host 'Da gui tin thu qua relay.' } else { Write-Warning 'Gui tin thu that bai - kiem tra URL, khoa, va relay da deploy chua.' }
     }
