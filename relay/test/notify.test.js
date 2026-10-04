@@ -1,17 +1,30 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const handler = require('../api/notify.js');
+const db = require('../lib/db.js'), store = require('../lib/store.js');
+const { makeFakeDb } = require('./fake-db.js');
 
+const hash = (k) => crypto.createHash('sha256').update(k).digest('hex');
 const KEY_A = 'a'.repeat(32), KEY_B = 'b'.repeat(40);
-const BOT = '123456:SECRET-BOT-TOKEN';
+const BOT = '123456:SECRET-BOT-TOKEN', DB_URI = 'mongodb://u:SECRET-DB-PASS@fake.invalid/x';
+let fake;
 
-function setEnv(over = {}) {
+function seedDb(over = {}) {
+  const machines = over.machines || [
+    { _id: 'laptop', keyHash: hash(KEY_A), createdAt: new Date(), revoked: false },
+    { _id: 'desk', keyHash: hash(KEY_B), createdAt: new Date(), revoked: false }];
+  const topics = over.topics || [{ _id: 'projA', threadId: 11 }, { _id: '_default', threadId: 99 }];
+  fake = makeFakeDb({ machines, topics });
+  db._setDb(fake); store._resetCache(); store._setClock(null);
+}
+function setEnv(over = {}, seed = {}) {
   process.env.TELEGRAM_BOT_TOKEN = BOT;
   process.env.TELEGRAM_CHAT_ID = '-100123';
-  process.env.NOTIFY_KEYS = JSON.stringify({ laptop: KEY_A, desk: KEY_B });
-  process.env.NOTIFY_TOPICS = JSON.stringify({ projA: 11, _default: 99 });
+  process.env.MONGODB_URI = DB_URI;
   for (const [k, v] of Object.entries(over)) { if (v === null) delete process.env[k]; else process.env[k] = v; }
+  seedDb(seed);
   handler._resetRateLimit();
 }
 function mockRes() {
@@ -37,7 +50,12 @@ function mockFetch(...responses) { // each: { status, json }
     return { ok: r.status >= 200 && r.status < 300, status: r.status, json: async () => r.json };
   };
 }
-function fresh(over) { setEnv(over); mockFetch(); }
+function fresh(over, seed) { setEnv(over, seed); mockFetch(); }
+function captureLogs() {
+  const lines = []; const orig = console.log; console.log = (...a) => lines.push(a.map(String).join(' '));
+  return { lines, restore: () => { console.log = orig; } };
+}
+const finds = (name) => fake.state.calls.filter((c) => c === name).length;
 
 test('GET gives 405 with Allow: POST', async () => {
   fresh();
@@ -49,24 +67,35 @@ test('GET gives 405 with Allow: POST', async () => {
 test('missing and wrong key give 401 and never reach Telegram', async () => {
   fresh();
   assert.equal((await call({ key: null })).statusCode, 401);
+  assert.equal(finds('machines.findOne'), 0, 'a missing key makes no lookup');
   assert.equal((await call({ key: 'z'.repeat(32) })).statusCode, 401);
+  assert.equal(finds('machines.findOne'), 1, 'a wrong key makes one lookup');
   assert.equal(calls.length, 0);
 });
 
-test('key order in NOTIFY_KEYS does not matter and machine name is appended', async () => {
-  for (const keys of [{ desk: KEY_B, laptop: KEY_A }, { laptop: KEY_A, desk: KEY_B }]) {
-    fresh({ NOTIFY_KEYS: JSON.stringify(keys) });
+test('each stored key authenticates as its own machine, whatever the insertion order', async () => {
+  const laptop = { _id: 'laptop', keyHash: hash(KEY_A), createdAt: new Date(), revoked: false };
+  const desk = { _id: 'desk', keyHash: hash(KEY_B), createdAt: new Date(), revoked: false };
+  for (const machines of [[desk, laptop], [laptop, desk]]) {
+    fresh({}, { machines });
     assert.equal((await call({ key: KEY_A })).statusCode, 200);
     assert.ok(calls[0].body.text.endsWith(' \u00b7 laptop'));
-    fresh({ NOTIFY_KEYS: JSON.stringify(keys) });
+    fresh({}, { machines });
     assert.equal((await call({ key: KEY_B })).statusCode, 200);
     assert.ok(calls[0].body.text.endsWith(' \u00b7 desk'));
   }
 });
 
-test('a key shorter than 32 chars is ignored', async () => {
-  fresh({ NOTIFY_KEYS: JSON.stringify({ laptop: KEY_A, short: 'abc' }) });
-  assert.equal((await call({ key: 'abc' })).statusCode, 401);
+test('a short or unknown key gives 401', async () => {
+  fresh();
+  for (const key of ['abc', 'z'.repeat(64)]) assert.equal((await call({ key })).statusCode, 401, key);
+  assert.equal(calls.length, 0);
+});
+
+test('a revoked key gives 401 and never reaches Telegram', async () => {
+  fresh({}, { machines: [{ _id: 'laptop', keyHash: hash(KEY_A), createdAt: new Date(), revoked: true }] });
+  assert.equal((await call({ key: KEY_A })).statusCode, 401);
+  assert.equal(calls.length, 0);
 });
 
 test('400 for malformed or oversized input', async () => {
@@ -110,16 +139,17 @@ test('unknown project uses _default, or no thread when there is none', async () 
   fresh();
   await call({ body: { project: 'other', text: 'hi' } });
   assert.equal(calls[0].body.message_thread_id, 99);
-  fresh({ NOTIFY_TOPICS: JSON.stringify({ projA: 11 }) });
+  fresh({}, { topics: [{ _id: 'projA', threadId: 11 }] });
   await call({ body: { project: 'other', text: 'hi' } });
   assert.ok(!('message_thread_id' in calls[0].body));
 });
 
 test('prototype property names never resolve to a thread', async () => {
-  fresh({ NOTIFY_TOPICS: JSON.stringify({ projA: 11 }) });
+  fresh({}, { topics: [{ _id: 'projA', threadId: 11 }] });
   for (const project of ['constructor', '__proto__', 'toString']) {
     await call({ body: { project, text: 'hi' } });
   }
+  assert.equal(calls.length, 3);
   for (const c of calls) assert.ok(!('message_thread_id' in c.body));
 });
 
@@ -157,7 +187,7 @@ test('rate limit: 30 per minute per machine, others unaffected', async () => {
   assert.equal((await call()).statusCode, 200);
 });
 
-test('the bot token never appears in any response', async () => {
+test('no secret appears in any response', async () => {
   const seen = [];
   fresh(); seen.push(await call());
   seen.push(await call({ method: 'GET' }));
@@ -166,14 +196,18 @@ test('the bot token never appears in any response', async () => {
   setEnv(); mockFetch({ status: 400, json: { ok: false, description: `leak ${BOT}` } });
   seen.push(await call());
   setEnv({ TELEGRAM_BOT_TOKEN: null }); seen.push(await call());
+  fresh(); fake.state.fail = true; seen.push(await call());
   fresh();
   for (let i = 0; i < 31; i++) seen.push(await call());
-  for (const res of seen) assert.ok(!JSON.stringify(res).includes(BOT));
+  for (const res of seen) {
+    const text = JSON.stringify(res);
+    for (const secret of [BOT, 'SECRET-DB-PASS', hash(KEY_A), DB_URI]) assert.ok(!text.includes(secret), secret);
+  }
 });
 
 test('missing or broken configuration gives an identical 500', async () => {
   const bodies = new Set();
-  for (const over of [{ TELEGRAM_BOT_TOKEN: null }, { TELEGRAM_CHAT_ID: null }, { NOTIFY_KEYS: null }, { NOTIFY_KEYS: '{not json' }]) {
+  for (const over of [{ TELEGRAM_BOT_TOKEN: null }, { TELEGRAM_CHAT_ID: null }, { MONGODB_URI: null }, { MONGODB_URI: '' }]) {
     fresh(over);
     const res = await call();
     assert.equal(res.statusCode, 500);
@@ -202,7 +236,7 @@ test('a closed or deleted topic also falls back to General', async () => {
 
 test('an out-of-range topic id is never sent to Telegram', async () => {
   for (const id of [1e300, 2147483648, -5, 0, 1.5, '11']) {
-    fresh({ NOTIFY_TOPICS: JSON.stringify({ projA: id }) });
+    fresh({}, { topics: [{ _id: 'projA', threadId: id }] });
     await call();
     assert.ok(!('message_thread_id' in calls[0].body), String(id));
   }
@@ -210,9 +244,121 @@ test('an out-of-range topic id is never sent to Telegram', async () => {
 
 test('newlines in project cannot forge log lines', async () => {
   fresh();
-  const lines = []; const orig = console.log; console.log = (s) => lines.push(String(s));
+  const cap = captureLogs();
   try { await call({ body: { project: 'x\nnotify machine=evil project=y status=200', text: 'hi' } }); }
-  finally { console.log = orig; }
-  assert.equal(lines.length, 1);
-  assert.ok(!lines[0].includes('\n'));
+  finally { cap.restore(); }
+  assert.equal(cap.lines.length, 1);
+  assert.ok(!cap.lines[0].includes('\n'));
+});
+
+test('DB-backed auth: the plaintext key is not in the database', async () => {
+  fresh();
+  assert.equal((await call()).statusCode, 200);
+  assert.ok(!fake.dump().includes(KEY_A));
+});
+
+test('30 s cache: a revoked key stays valid for at most 30 s', async () => {
+  fresh();
+  let t = 1e6; store._setClock(() => t);
+  assert.equal((await call()).statusCode, 200);
+  fake.collection('machines').docs[0].revoked = true;
+  t = 1e6 + 29999;
+  assert.equal((await call()).statusCode, 200);
+  t = 1e6 + 30001;
+  assert.equal((await call()).statusCode, 401);
+});
+
+test('a valid cached key makes no second DB lookup within the TTL', async () => {
+  fresh();
+  let t = 1e6; store._setClock(() => t);
+  await call(); await call(); await call();
+  assert.equal(finds('machines.findOne'), 1);
+});
+
+test('unknown keys are not cached', async () => {
+  fresh();
+  assert.equal((await call({ key: 'q'.repeat(40) })).statusCode, 401);
+  fake.collection('machines').docs.push({ _id: 'late', keyHash: hash('q'.repeat(40)), createdAt: new Date(), revoked: false });
+  assert.equal((await call({ key: 'q'.repeat(40) })).statusCode, 200);
+});
+
+test('_default topic comes from the DB', async () => {
+  fresh();
+  await call({ body: { project: 'brand-new', text: 'hi' } });
+  assert.equal(calls[0].body.message_thread_id, 99);
+});
+
+test('topic cache keeps misses for 30 s end to end', async () => {
+  fresh({}, { topics: [{ _id: 'projA', threadId: 11 }] });
+  let t = 1e6; store._setClock(() => t);
+  await call({ body: { project: 'p2', text: 'hi' } });
+  assert.ok(!('message_thread_id' in calls[0].body));
+  fake.collection('topics').docs.push({ _id: 'p2', threadId: 7 });
+  await call({ body: { project: 'p2', text: 'hi' } });
+  assert.ok(!('message_thread_id' in calls[1].body), 'cached miss');
+  t = 1e6 + 30001;
+  await call({ body: { project: 'p2', text: 'hi' } });
+  assert.equal(calls[2].body.message_thread_id, 7);
+});
+
+test('503 when the store throws on the key lookup', async () => {
+  fresh(); fake.state.fail = true;
+  const cap = captureLogs();
+  let res;
+  try { res = await call(); } finally { cap.restore(); }
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.body, JSON.stringify({ error: 'storage unavailable' }));
+  assert.equal(calls.length, 0, 'Telegram is not called');
+  const everything = res.body + cap.lines.join('\n');
+  for (const secret of ['SECRET-DB-PASS', KEY_A, hash(KEY_A), DB_URI]) assert.ok(!everything.includes(secret), secret);
+});
+
+test('topic lookup failure still delivers to General', async () => {
+  fresh();
+  assert.equal((await call()).statusCode, 200); // caches the key
+  fake.state.fail = true;
+  const res = await call({ body: { project: 'new-project', text: 'hi' } });
+  assert.equal(res.statusCode, 200);
+  assert.ok(!('message_thread_id' in calls[1].body));
+});
+
+test('secrets never reach the logs', async () => {
+  fresh();
+  const cap = captureLogs();
+  try {
+    await call();
+    await call({ key: 'z'.repeat(40) });
+    mockFetch({ status: 500, json: {} }); await call();
+    fake.state.fail = true; store._resetCache(); await call();
+  } finally { cap.restore(); }
+  assert.equal(cap.lines.length, 3, 'one line each for 200, 502 and 503; a 401 logs nothing');
+  const text = cap.lines.join('\n');
+  for (const secret of [BOT, KEY_A, hash(KEY_A), DB_URI, 'SECRET-DB-PASS']) assert.ok(!text.includes(secret), secret);
+});
+
+test('an IP that keeps sending unknown keys loses database lookups but keeps the cache', async () => {
+  fresh();
+  const ip = { 'x-forwarded-for': '9.9.9.9' };
+  assert.equal((await call({ headers: ip })).statusCode, 200, 'warms the cache for KEY_A');
+  const before = finds('machines.findOne');
+  for (let i = 0; i < 30; i++) assert.equal((await call({ key: 'u'.repeat(30) + i, headers: ip })).statusCode, 401);
+  assert.equal(finds('machines.findOne') - before, 30, 'each of the first 30 failures reached the database');
+  const mid = finds('machines.findOne');
+  assert.equal((await call({ key: 'v'.repeat(40), headers: ip })).statusCode, 401);
+  assert.equal(finds('machines.findOne'), mid, 'no database lookup once the IP is over the limit');
+  assert.equal((await call({ key: KEY_B, headers: ip })).statusCode, 401, 'a valid but uncached key gets no lookup from that IP');
+  assert.equal(finds('machines.findOne'), mid);
+  assert.equal((await call({ headers: ip })).statusCode, 200, 'the cached key still works');
+  assert.equal((await call({ key: KEY_B, headers: { 'x-forwarded-for': '8.8.8.8' } })).statusCode, 200, 'another IP is unaffected');
+  handler._resetRateLimit();
+  assert.equal((await call({ key: KEY_B, headers: ip })).statusCode, 200);
+});
+
+test('a body getter that throws gives 400, not a crash', async () => {
+  fresh();
+  const req = { method: 'POST', headers: { authorization: 'Bearer ' + KEY_A }, get body() { throw new Error('invalid json'); } };
+  const res = mockRes();
+  await handler(req, res);
+  assert.equal(res.statusCode, 400);
+  assert.equal(calls.length, 0);
 });

@@ -1,53 +1,30 @@
 'use strict';
-const crypto = require('node:crypto');
+const { MAX_BODY, sha, send, clean, clientIp, readBody } = require('../lib/util');
+const store = require('../lib/store');
 
-const MAX_BODY = 4096, MAX_PROJECT = 100, MAX_TEXT = 500;
+const MAX_PROJECT = 100, MAX_TEXT = 500;
 const WINDOW_MS = 60000, MAX_REQ = 30;
 const TG_TIMEOUT_MS = 4000; // two attempts (retry without thread) must fit inside the client's 10 s timeout
 const hits = new Map(); // machine name -> array of timestamps (best-effort, per instance)
+const MAX_IP_FAILS = 30, MAX_IPS = 1000;
+const failsByIp = new Map(); // ip -> timestamps of failed authentications (best-effort, per instance)
 
-function sha(s) { return crypto.createHash('sha256').update(String(s)).digest(); }
-
-function send(res, code, obj, headers = {}) {
-  res.statusCode = code;
-  res.setHeader('Content-Type', 'application/json');
-  for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
-  res.end(JSON.stringify(obj));
+function recentFails(ip, now) { return (failsByIp.get(ip) || []).filter((t) => now - t < WINDOW_MS); }
+function ipThrottled(ip) { return recentFails(ip, Date.now()).length >= MAX_IP_FAILS; }
+function noteFailure(ip) {
+  const now = Date.now(), arr = recentFails(ip, now);
+  arr.push(now);
+  if (failsByIp.size >= MAX_IPS && !failsByIp.has(ip)) failsByIp.clear(); // bounded memory
+  failsByIp.set(ip, arr);
 }
 
-function loadConfig() { // null when anything required is missing or invalid
-  try {
-    const token = process.env.TELEGRAM_BOT_TOKEN, chat = process.env.TELEGRAM_CHAT_ID;
-    if (!token || !chat) return null;
-    const keys = JSON.parse(process.env.NOTIFY_KEYS || '');
-    const entries = Object.entries(keys).filter(([, k]) => typeof k === 'string' && k.length >= 32);
-    if (!entries.length) return null;
-    const topics = process.env.NOTIFY_TOPICS ? JSON.parse(process.env.NOTIFY_TOPICS) : {};
-    if (!topics || typeof topics !== 'object' || Array.isArray(topics)) return null;
-    return { token, chat, entries, topics };
-  } catch { return null; }
+function loadConfig() { // null when anything required is missing
+  const token = process.env.TELEGRAM_BOT_TOKEN, chat = process.env.TELEGRAM_CHAT_ID, uri = process.env.MONGODB_URI;
+  return token && chat && uri ? { token, chat } : null;
 }
-
-function authenticate(header, entries) { // no early exit: every key is compared
+async function authenticate(header, allowDb) { // machine name or null; throws when storage is down
   const m = /^Bearer (.+)$/.exec(header || '');
-  const given = sha(m ? m[1] : '');
-  let machine = null;
-  for (const [name, key] of entries) {
-    if (crypto.timingSafeEqual(given, sha(key)) && m) machine = machine || name;
-  }
-  return machine;
-}
-
-function clean(s) { return s.replace(/[\u0000-\u0009\u000B-\u001F\u007F]/g, '').trim(); }
-
-async function readBody(req) {
-  if (req.body !== undefined && req.body !== null) {
-    return typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
-  }
-  if (typeof req[Symbol.asyncIterator] !== 'function') return ''; // no stream: treat as an empty body
-  const chunks = []; let n = 0;
-  for await (const c of req) { n += c.length; if (n > MAX_BODY) return null; chunks.push(c); }
-  return Buffer.concat(chunks).toString('utf8');
+  return m ? store.findMachineByKeyHash(sha(m[1]).toString('hex'), allowDb) : null;
 }
 
 function rateLimited(machine) { // seconds to wait, or 0 when allowed
@@ -74,12 +51,16 @@ async function handler(req, res) {
   if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' }, { Allow: 'POST' });
   const cfg = loadConfig();
   if (!cfg) return send(res, 500, { error: 'not configured' });
-  const machine = authenticate(req.headers && req.headers.authorization, cfg.entries);
-  if (!machine) return send(res, 401, { error: 'unauthorized' });
+  const ip = clientIp(req);
+  let machine;
+  // An IP that keeps failing authentication may no longer trigger database lookups (it still gets cached keys).
+  try { machine = await authenticate(req.headers && req.headers.authorization, !ipThrottled(ip)); }
+  catch { console.log('notify status=503'); return send(res, 503, { error: 'storage unavailable' }); } // never log the error object
+  if (!machine) { noteFailure(ip); return send(res, 401, { error: 'unauthorized' }); }
   const wait = rateLimited(machine);
   if (wait) return send(res, 429, { error: 'rate limited' }, { 'Retry-After': String(wait) });
 
-  const raw = await readBody(req);
+  let raw; try { raw = await readBody(req); } catch { raw = null; } // a platform body getter can throw on invalid JSON
   if (raw === null || Buffer.byteLength(raw) > MAX_BODY) return send(res, 400, { error: 'bad request' });
   let b; try { b = JSON.parse(raw); } catch { return send(res, 400, { error: 'bad request' }); }
   if (!b || typeof b !== 'object' || Array.isArray(b) || typeof b.project !== 'string' || typeof b.text !== 'string')
@@ -88,10 +69,8 @@ async function handler(req, res) {
   if (!project || project.length > MAX_PROJECT || !text || text.length > MAX_TEXT)
     return send(res, 400, { error: 'bad request' });
 
-  const has = (k) => Object.prototype.hasOwnProperty.call(cfg.topics, k);
-  const valid = (v) => Number.isSafeInteger(v) && v > 0 && v <= 2147483647; // Telegram thread ids are 32-bit
-  const thread = has(project) && valid(cfg.topics[project]) ? cfg.topics[project]
-    : (has('_default') && valid(cfg.topics._default) ? cfg.topics._default : null);
+  let thread = null;
+  try { thread = await store.findTopic(project); } catch { /* topic lookup failed: post to General */ }
   const body = { chat_id: cfg.chat, text: `${text} \u00b7 ${machine}` }; // no parse_mode: plain text only
   if (thread !== null) body.message_thread_id = thread;
 
@@ -104,4 +83,4 @@ async function handler(req, res) {
 }
 
 module.exports = handler;
-module.exports._resetRateLimit = () => hits.clear();
+module.exports._resetRateLimit = () => { hits.clear(); failsByIp.clear(); };
