@@ -97,43 +97,55 @@ Sau khi chạy xong, **mở session Claude Code mới** (hook và skill chỉ đ
 - Gỡ lỗi: đặt biến môi trường `CLAUDE_NOTIFY_DEBUG=1` để ghi mọi payload hook vào `%TEMP%\claude-notify-debug.log`.
 - Nếu không thấy toast: tắt **Focus Assist / Do Not Disturb** trong Windows Settings. Bell âm thanh trong VS Code là tuỳ chọn, bật bằng `terminal.integrated.enableBell: true`.
 
-#### Thông báo Telegram (group có Topics, mỗi project một topic)
+#### Thông báo điện thoại qua Relay (Telegram)
 
-Tin được gửi bằng bot vào **một supergroup bật Topics**. **Bạn tự tạo topic** cho từng project; bot chỉ gửi vào topic đã có, không tự tạo. Project nào chưa được map với topic thì tin rơi vào topic *General* của group (không bị mất).
+Bot token chỉ nằm **một chỗ**: biến môi trường của relay trên Vercel. Mỗi máy chỉ gửi `{project, text}` kèm **khoá riêng của máy** tới `relay/api/notify.js`; relay kiểm tra khoá, giới hạn tần suất rồi gọi Telegram. Chưa deploy relay hoặc Vercel gặp sự cố thì chỉ còn toast trên máy.
 
-| Sự kiện | Nội dung tin Telegram |
+| Sự kiện | Nội dung tin |
 | --- | --- |
 | Claude hỏi bạn chọn phương án (`AskUserQuestion`) | `Claude cần bạn đưa ra quyết định ở <project>` |
 | Claude xin quyền / chờ lâu (`Notification`) | `Claude đang chờ bạn ở <project>` |
 | Claude làm xong (`Stop`) | `Claude đã xong ở <project> (x phút y giây)` — **chỉ gửi nếu lượt chạy ≥ 60 giây** |
 
-Tin cố ý chung chung: không gửi code, đường dẫn hay nội dung câu hỏi ra ngoài máy. Toast trên máy vẫn hiện đầy đủ chi tiết.
+Tin cố ý chung chung: không gửi code, đường dẫn hay nội dung câu hỏi ra ngoài máy. Cuối tin có ` · <tên máy>` để biết tin đến từ máy nào.
 
-**Cài đặt một lần cho mỗi máy** (cần làm trước trên Telegram, các máy sau dùng lại **cùng bot và cùng group**: chat với `@BotFather` → `/newbot` lấy token — quên thì gõ `/token`; tạo supergroup, bật *Topics*, tự tạo các topic; thêm bot làm **admin**; gửi một tin bất kỳ trong group):
+**1. Deploy relay lên Vercel (một lần):**
+
+1. Trên Telegram: `@BotFather` → `/newbot` lấy token. Tạo supergroup, bật *Topics*, **tự tạo** một topic cho mỗi project, thêm bot làm **admin**.
+2. Vercel: Import repo này, đặt **Root Directory = `relay`**, không cần build command (Framework: Other).
+3. Project Settings → Environment Variables (Production), rồi Redeploy:
+
+   | Biến | Giá trị |
+   | --- | --- |
+   | `TELEGRAM_BOT_TOKEN` | token của bot |
+   | `TELEGRAM_CHAT_ID` | id supergroup, dạng `-100xxxxxxxxxx` |
+   | `NOTIFY_KEYS` | JSON `{"laptop":"<khoá ≥ 32 ký tự>","desk":"<khoá khác>"}` — mỗi máy một khoá, tên máy được nối vào cuối tin |
+   | `NOTIFY_TOPICS` | JSON `{"<tên thư mục project>":<message_thread_id>,"_default":<id>}` — `_default` tuỳ chọn |
+
+4. Sinh khoá ngẫu nhiên (PowerShell 5.1, ra 44 ký tự):
+   ```powershell
+   $b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
+   ```
+5. Lấy `message_thread_id` từ link topic `https://t.me/c/<chat>/<thread>` (chuột phải topic → Copy Topic Link; hoặc link của một tin bên trong topic `t.me/c/<chat>/<thread>/<message>`). Số đầu sau `/c/` là chat (`TELEGRAM_CHAT_ID` = `-100` + số đó), số thứ hai là `message_thread_id`. Ví dụ `t.me/c/1234567890/5` → chat `-1001234567890`, thread `5`. Topic General không có thread: bỏ qua.
+
+Project không có trong `NOTIFY_TOPICS` thì tin vào `_default`, nếu không có `_default` thì vào General. Topic đã bị xoá/đóng thì tin tự gửi lại vào General một lần, không mất. Đổi bản đồ hoặc khoá = sửa biến môi trường trên Vercel rồi redeploy. Giới hạn của relay: chỉ nhận POST, body ≤ 4 KB, `text` ≤ 500, `project` ≤ 100, 30 request/phút/máy (best-effort, giữ trong bộ nhớ). Gói Vercel miễn phí dành cho mục đích phi thương mại; dùng cho công việc công ty cần xem lại điều khoản.
+
+**2. Cài mỗi máy (một lần):**
 
 ```powershell
-& "$HOME\.claude\notify-ctl.cmd" telegram-setup
+& "$HOME\.claude\notify-ctl.cmd" relay-setup
 ```
 
-Script hỏi token (không hiện trên màn hình), tự tìm group, rồi lưu vào `~/.claude/notify.telegram.json`. Token được **mã hoá theo tài khoản Windows (DPAPI)** nên **không copy sang máy khác được** — mỗi máy chạy `telegram-setup` một lần với cùng token. File này **nằm ngoài repo**, không bao giờ commit, không cần dán token vào chat. Máy mới không tự dò lại được group (Telegram chỉ giữ cập nhật ~24 giờ): lấy `chat_id` bằng `notify-ctl.cmd status` trên máy cũ rồi chạy `telegram-setup -ChatId <chat_id>`.
+Script hỏi URL relay (`https://<app>.vercel.app/api/notify`; thêm `-Url <url>` để bỏ qua câu hỏi) và khoá của máy này (không hiện trên màn hình), lưu vào `~/.claude/notify.relay.json` — khoá được **mã hoá DPAPI theo tài khoản Windows**, nằm **ngoài repo**, không bao giờ commit — rồi gửi một tin thử. File `~/.claude/notify.telegram.json` của bản cũ (nếu có) được xoá tự động.
 
-**Map project → topic** (dữ liệu không bí mật, nằm trong repo `hooks/notify.topics.json` nên **commit để mọi máy dùng chung**):
-
-| Muốn | Lệnh |
-| --- | --- |
-| Map project theo tin bạn vừa gửi vào topic đó (bot phải là admin) | `notify-ctl.cmd topic-detect <project>` rồi gửi 1 tin vào topic, nhấn Enter |
-| Map thủ công bằng số topic (`message_thread_id`) | `notify-ctl.cmd topic-add <project> <thread_id>` |
-| Xem / bỏ map | `notify-ctl.cmd topics` / `notify-ctl.cmd topic-remove <project>` |
-| Topic mặc định cho project chưa map | `notify-ctl.cmd topic-add _default <thread_id>` |
-
-`<project>` là **tên thư mục** của project (không có tham số thì lấy thư mục đang đứng). Lệnh đầy đủ: `& "$HOME\.claude\notify-ctl.cmd" <lệnh>`.
+Mất máy: xoá/đổi khoá của máy đó trong `NOTIFY_KEYS` rồi redeploy; các máy khác không bị ảnh hưởng. Test relay cục bộ: `cd relay; node --test` (cần Node ≥ 18, không cần mạng). `<project>` là **tên thư mục** của project.
 
 **Bật/tắt tạm thời** (gõ trong Claude Code hoặc terminal):
 
 | Muốn | Lệnh trong Claude Code | Lệnh terminal |
 | --- | --- | --- |
 | Tắt tất cả 30 phút / 1 / 4 / 8 giờ | `/notify snooze 30m` (`1h`, `4h`, `8h`) | `& "$HOME\.claude\notify-ctl.cmd" snooze 1h` |
-| Chỉ tắt Telegram (toast vẫn hiện) | `/notify snooze 4h telegram` | `... snooze 4h telegram` |
+| Chỉ tắt kênh điện thoại/Telegram (toast vẫn hiện) | `/notify snooze 4h telegram` | `... snooze 4h telegram` |
 | Chỉ tắt toast | `/notify snooze 1h toast` | `... snooze 1h toast` |
 | Bật lại ngay | `/notify on` | `... on` |
 | Xem trạng thái / gửi thử | `/notify status` / `/notify test` | `... status` / `... test` |
@@ -144,7 +156,7 @@ Tinh chỉnh lâu dài (bật/tắt từng kênh hoặc từng loại sự kiệ
 
 - `install.cmd` — chỉ là launcher một dòng, tự truyền `-ExecutionPolicy Bypass` để chạy được trên máy mới dù PowerShell đang chặn script.
 - `install.ps1` — toàn bộ logic cài đặt.
-- `hooks/notify.ps1` — bộ điều phối hook; `hooks/channels/` — mỗi kênh (`toast.ps1`, `telegram.ps1`) một file, thêm kênh mới chỉ cần thêm file; `hooks/notify-ctl.ps1` — snooze/status/setup; `hooks/notify.config.json` — cấu hình; `hooks/notify.topics.json` — map project → topic Telegram (commit, dùng chung các máy); `hooks/claude-logo.png` — logo toast. `~/.claude/notify-ctl.cmd` do `install.cmd -Notify` sinh ra theo từng máy (không commit).
+- `hooks/notify.ps1` — bộ điều phối hook; `hooks/channels/` — mỗi kênh (`toast.ps1`, `relay.ps1`) một file, thêm kênh mới chỉ cần thêm file; `hooks/notify-ctl.ps1` — snooze/status/relay-setup; `hooks/notify.config.json` — cấu hình; `hooks/claude-logo.png` — logo toast; `relay/` — relay Vercel serverless (`api/notify.js`, `test/notify.test.js`). `~/.claude/notify-ctl.cmd` do `install.cmd -Notify` sinh ra theo từng máy (không commit).
 
 > Trên Windows **không dùng `ln -s`**: Git Bash mặc định chỉ copy file chứ không tạo link thật.
 

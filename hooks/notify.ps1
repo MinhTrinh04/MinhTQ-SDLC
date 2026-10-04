@@ -34,7 +34,7 @@ if ($hookEvent -eq 'UserPromptSubmit') {
 $cwd = if ($data -and $data.cwd) { [string]$data.cwd } elseif ($env:CLAUDE_PROJECT_DIR) { $env:CLAUDE_PROJECT_DIR } else { (Get-Location).Path }
 $project = Split-Path $cwd -Leaf
 
-# Message kind + texts. Toast shows detail; Telegram stays deliberately generic (no code/paths leave the machine).
+# Message kind + texts. Toast shows detail; the phone message (relay) stays deliberately generic (no code/paths leave the machine).
 $kind = $null; $elapsed = $null
 if ($hookEvent -eq 'PreToolUse') {
     $kind  = 'AskUserQuestion'
@@ -92,7 +92,7 @@ if (Test-ChannelOn 'toast' 0) {
     try { Send-Toast -Title $title -Body $body } catch { }
 }
 if (Test-ChannelOn 'telegram' 60) {
-    . (Join-Path $PSScriptRoot 'channels\telegram.ps1')
-    [void](Send-Telegram -Text $tgText -Project $project)
+    . (Join-Path $PSScriptRoot 'channels\relay.ps1')
+    [void](Send-Relay -Text $tgText -Project $project)
 }
 exit 0
