@@ -51,23 +51,53 @@ Toàn bộ nội dung Tầng 1 (`CLAUDE.md` global, `agents/`, `commands/`, `set
 
 **Không clone trực tiếp đè lên `~/.claude/`** — thư mục này đã có sẵn cache, session history, config khác của Claude Code; clone đè có thể gây xung đột hoặc mất dữ liệu không thuộc repo.
 
-**Cách làm đúng — clone vào thư mục riêng rồi chạy script cài đặt:**
+**Cách làm đúng — clone vào thư mục riêng rồi chạy script cài đặt (Windows):**
 
-```bash
+```powershell
 # 1. Clone vào thư mục riêng, KHÔNG phải ~/.claude
-git clone https://github.com/<ban>/claude-code-setup.git ~/claude-code-setup
-cd ~/claude-code-setup
+git clone https://github.com/<ban>/claude-code-setup.git C:\Github\MinhTQ-SDLC
+cd C:\Github\MinhTQ-SDLC
 
-# 2. Cài đặt (tạo link vào ~/.claude/)
-.\install.cmd        # Windows (cmd/PowerShell) — dùng directory junction, không cần quyền admin
+# 2. Cài đặt — chọn 1 trong các lệnh ở bảng dưới
+.\install.cmd
 ```
 
-Script link `agents/`, `commands/` và **từng thư mục con** của `skills/` vào `~/.claude/` (không link cả `skills/` vì `~/.claude/skills/` còn chứa thư mục do Claude tự quản lý như `synced/`). Đặc điểm:
+#### Hướng dẫn sử dụng `install.cmd`
+
+Script có **2 phần độc lập**. Chạy từ thư mục gốc của repo, trong cmd hoặc PowerShell, không cần quyền admin:
+
+| Muốn làm gì | Lệnh |
+| --- | --- |
+| **Cài tổng** (links + thông báo) — dùng cho máy mới | `.\install.cmd` |
+| Chỉ cài **links**: `agents/`, `commands/`, các `skills/*` vào `~/.claude/` | `.\install.cmd -Links` |
+| Chỉ cài **thông báo (toast)** khi Claude xong việc hoặc cần bạn | `.\install.cmd -Notify` |
+| Gỡ tất cả những gì script đã thêm | `.\install.cmd -Uninstall` |
+| Chỉ gỡ links | `.\install.cmd -Uninstall -Links` |
+| Chỉ gỡ thông báo | `.\install.cmd -Uninstall -Notify` |
+
+Sau khi chạy xong, **mở session Claude Code mới** (hook và skill chỉ được nạp lúc khởi động session).
+
+**Phần Links** — tạo directory junction từ `~/.claude/` về repo: `agents/`, `commands/` và **từng thư mục con** của `skills/` (không link cả `skills/` vì `~/.claude/skills/` còn chứa thư mục do Claude tự quản lý như `synced/`).
 
 - **Chạy lại bao nhiêu lần cũng được** (idempotent): link đã đúng thì bỏ qua; thêm skill mới vào repo thì chạy lại để link thêm; skill đã xoá khỏi repo thì link mồ côi được dọn.
 - **Không bao giờ ghi đè dữ liệu thật**: nếu `~/.claude/agents` (v.v.) đã là thư mục thật, script cảnh báo và bỏ qua — hãy backup/đổi tên rồi chạy lại.
-- **Gỡ cài đặt**: `.\install.cmd -Uninstall` — chỉ xoá các link trỏ vào repo này, không đụng file nào khác.
-- Không link `CLAUDE.md` của repo (đó là hướng dẫn test cho chính repo này). Nếu cần `settings.json`/`CLAUDE.md` global, thêm vào script khi có file tương ứng.
+- Không link `CLAUDE.md` của repo (đó là hướng dẫn test cho chính repo này).
+
+**Phần Notify** — hiện toast Windows (kèm logo Claude) bằng module BurntToast:
+
+- Cài BurntToast cho user hiện tại nếu chưa có (cần internet).
+- Gộp 2 hook vào `~/.claude/settings.json`, **giữ nguyên mọi setting khác** và tự backup thành `settings.json.bak`:
+  - `Stop` → toast "Tác vụ đã hoàn thành!" khi Claude làm xong.
+  - `Notification` → toast kèm thông điệp khi Claude cần bạn cấp quyền hoặc đang chờ trả lời.
+- Hook trỏ thẳng vào `hooks\notify.ps1` trong repo (đường dẫn được tính lúc cài). Nếu **di chuyển repo** sang chỗ khác thì chạy lại `.\install.cmd -Notify`.
+- Logo toast là `hooks\claude-logo.png`; muốn đổi logo chỉ cần thay file này.
+- Nếu không thấy toast: tắt **Focus Assist / Do Not Disturb** trong Windows Settings. Bell âm thanh trong VS Code là tuỳ chọn, bật bằng `terminal.integrated.enableBell: true`.
+
+**Cấu trúc file cài đặt:**
+
+- `install.cmd` — chỉ là launcher một dòng, tự truyền `-ExecutionPolicy Bypass` để chạy được trên máy mới dù PowerShell đang chặn script.
+- `install.ps1` — toàn bộ logic cài đặt.
+- `hooks/notify.ps1` + `hooks/claude-logo.png` — script và logo của toast.
 
 > Trên Windows **không dùng `ln -s`**: Git Bash mặc định chỉ copy file chứ không tạo link thật.
 
