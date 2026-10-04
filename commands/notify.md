@@ -24,6 +24,6 @@ If `$ARGUMENTS` is empty, run `status`.
 ## Hard rules
 
 - If `~/.claude/notify-ctl.cmd` does not exist, say so and tell the user to run `.\install.cmd -Notify` from the repo root — never recreate the shim by hand.
-- `relay-setup` is NOT available through this command: it asks for a secret per-machine relay key interactively. If the user asks for it, tell them to run `& "$HOME\.claude\notify-ctl.cmd" relay-setup` themselves in a terminal. Never ask for, read, or echo a relay key (or any bot token) in this session.
+- `relay-setup` and all admin commands (`admin-setup`, `machine-add`, `machine-revoke`, `machines`, `topic-add`, `topic-remove`, `topics`) are NOT available through this command: they handle secret keys (the per-machine relay key and the relay admin key). If the user asks for one of them, tell them to run `& "$HOME\.claude\notify-ctl.cmd" <command>` themselves in a terminal. Never ask for, read, print or echo a relay key, an admin key, a MongoDB connection string or a bot token in this session, and never read `~/.claude/notify.relay.json` or `~/.claude/notify.admin.json`.
 - Never edit `~/.claude/settings.json`, `hooks/notify.config.json` or any state file from this command — the control script is the only thing that writes state.
 - Any argument other than the four forms above: print the usage list above and STOP; do not guess. This check is a precondition of Step 2, never a follow-up to it.

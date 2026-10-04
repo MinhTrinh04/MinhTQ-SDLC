@@ -206,7 +206,8 @@ máy admin ──POST /api/admin (Bearer NOTIFY_ADMIN_KEY) {action,...}──►
 | Dò khoá admin | Khoá ≥ 32 ký tự ngẫu nhiên, timing-safe, giới hạn cả lần sai, phản hồi lỗi chung |
 | Lộ `MONGODB_URI` | Chỉ ở env Vercel; user DB chỉ có quyền `readWrite` trên một database; mật khẩu mạnh; xoay mật khẩu được |
 | Atlas Network Access mở `0.0.0.0/0` (gói miễn phí/Vercel không có IP cố định) | Chấp nhận có chủ đích, bù bằng: TLS bắt buộc, mật khẩu mạnh, user DB quyền tối thiểu, DB chỉ chứa băm và id topic. Ghi rõ trong README |
-| DB bị lộ | Chỉ có băm SHA-256 của khoá 256 bit và id topic: không dùng được để giả máy |
+| Bản sao dữ liệu chỉ-đọc của DB bị lộ | Chỉ có băm SHA-256 của khoá 256 bit và id topic: không dùng được để giả máy |
+| `MONGODB_URI` (quyền `readWrite`) bị lộ | **Không vô hại:** kẻ gian ghi được một "máy" giả (băm khoá của họ) và sửa bản đồ topic, rồi gửi tin vào Telegram. Biện pháp: chỉ đặt URI trên Vercel, mật khẩu mạnh, xoay mật khẩu ngay khi nghi lộ; README nêu rõ |
 | Thu hồi khoá chậm | Tối đa 30 giây (TTL cache), chấp nhận được; chỉnh bằng hằng số |
 | Cụm Atlas/DB sập | Fail closed (503); toast trên máy vẫn hoạt động |
 | NoSQL injection | Kiểm kiểu chặt, không nhận toán tử từ đầu vào (9.5) |
@@ -228,3 +229,21 @@ máy admin ──POST /api/admin (Bearer NOTIFY_ADMIN_KEY) {action,...}──►
 - **Cluster miễn phí có thể bị tạm dừng khi lâu không dùng** (cần xem chính sách hiện hành của Atlas); khi đó tin điện thoại ngừng cho đến khi bật lại, toast vẫn chạy.
 - **Thêm một dịch vụ phải vận hành** và thêm một credential quan trọng (`MONGODB_URI`) cùng một khoá admin.
 - **Ngoài phạm vi:** bot tự tạo topic, giao diện web quản trị, tự xoay khoá, nhật ký kiểm toán.
+
+### 9.11 Ghi chú triển khai (2026-10-04)
+
+Khi lập kế hoạch triển khai, năm điểm sau được chốt hơi khác so với văn bản của mục 9 ở trên; **code theo các điểm này**:
+1. Thêm `relay/lib/util.js` dùng chung giữa `notify.js` và `admin.js` (tránh nhân đôi `sha`, `send`, `clean`, `readBody`); spec chỉ liệt kê `db.js` và `store.js`.
+2. `machine-list` và `topic-list` trả `{machines:[...]}` và `{topics:[...]}` (bọc trong object) thay vì mảng trần.
+3. Tra **topic** lỗi thì hạ cấp thành "không có thread" (tin vào General); chỉ tra **khoá** lỗi mới fail closed 503. Lý do: tin đã được xác thực nên không nên mất tin chỉ vì không tra được topic.
+4. `machine-add -Apply` **không in khoá**; chỉ in khoá nếu ghi `notify.relay.json` thất bại (để khoá không bị mất).
+5. ~~Giới hạn lần xác thực sai của admin kiểm tra trước phép so khoá~~ — **đã đổi sau review:** khoá admin được so **trước**; chỉ khoá **sai** mới bị đếm và giới hạn, **theo từng IP** (`X-Forwarded-For`, 20 lần/phút), và khoá đúng **không bao giờ** bị chặn. Cách ban đầu (bộ đếm toàn cục kiểm tra trước) cho phép kẻ gian khoá ngoài chính admin.
+
+Các điểm bổ sung sau khi `reviewer` rà soát:
+6. `notify.js`: một IP gửi quá 30 khoá sai/phút không còn được **tra DB** (`findMachineByKeyHash(hex, allowDb = false)` chỉ phục vụ từ cache), để dò khoá không làm cạn giới hạn kết nối/thao tác của Atlas M0. Khoá đúng đã nằm trong cache vẫn dùng được; IP khác không bị ảnh hưởng.
+7. `store.js`: bộ đếm `generation` tăng ở mỗi lần `invalidate()`; một lượt tra đang chạy dở khi có ghi (ví dụ thu hồi khoá) **không** được ghi lại kết quả cũ vào cache.
+8. `db.js`: `socketTimeoutMS` 4 giây; sau một lần kết nối thất bại thì từ chối ngay trong 5 giây (không quay số lại ở mỗi request); lỗi tạo chỉ mục không làm hỏng cả lớp DB (lookups vẫn chạy).
+9. `util.clean` loại thêm các ký tự dòng/vô hình/bidi (U+0085, U+2028, U+2029, các ký tự zero-width và điều khiển bidi, U+FEFF) khỏi `text` và `project`; `admin.js` từ chối (400) các giá trị chứa chúng.
+10. `readBody` được bọc `try/catch` ở cả hai endpoint (getter `req.body` của nền tảng có thể ném lỗi khi JSON hỏng); các response chứa dữ liệu của admin có `Cache-Control: no-store`.
+11. Client: `machine-add` báo lỗi khi phản hồi 200 không có khoá; `-Apply` cảnh báo khi ghi đè cấu hình relay cũ (khoá cũ vẫn hiệu lực cho tới khi `machine-revoke`); `topic-remove` kiểm tra tên project như `topic-add`; `admin-setup` huỷ file vừa lưu nếu server trả 401.
+12. Biết trước, không sửa: chưa có lệnh xoá hoặc cấp lại khoá cho một tên máy đã dùng (tên bị giữ chỗ vĩnh viễn, đúng thiết kế mục 9.4); giới hạn 4 KB chỉ là kiểm tra sau khi nền tảng đã parse body (Vercel tự giới hạn ~4,5 MB).
