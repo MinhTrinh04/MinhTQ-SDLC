@@ -1,1 +1,3 @@
 .claude/worktrees/
+.vercel/
+relay/node_modules/
