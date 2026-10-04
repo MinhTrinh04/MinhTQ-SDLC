@@ -55,7 +55,8 @@ function Add-Link($link, $target) {
 
 $notifyScript = Join-Path $repo 'hooks\notify.ps1'
 $hookCommand  = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$notifyScript`""
-$hookEvents   = 'Stop', 'Notification'
+$hookEvents   = 'Stop', 'Notification', 'PreToolUse'
+$hookMatchers = @{ PreToolUse = 'AskUserQuestion' }   # PreToolUse only fires for the human-decision tool
 
 function Test-NotifyEntry($entry) {
     $cmds = @()
@@ -84,7 +85,9 @@ function Update-NotifyHooks([bool]$Add) {
         $existing = @(); if ($s.hooks.PSObject.Properties[$ev]) { $existing = @($s.hooks.$ev) }
         $kept = @($existing | Where-Object { -not (Test-NotifyEntry $_) })
         if ($Add) {
-            $kept += [pscustomobject]@{ hooks = @([pscustomobject]@{ type = 'command'; command = $hookCommand }) }
+            $entry = [pscustomobject]@{ hooks = @([pscustomobject]@{ type = 'command'; command = $hookCommand }) }
+            if ($hookMatchers[$ev]) { $entry | Add-Member -NotePropertyName matcher -NotePropertyValue $hookMatchers[$ev] }
+            $kept += $entry
         }
         if ($kept.Count) { $s.hooks | Add-Member -Force -NotePropertyName $ev -NotePropertyValue $kept }
         else { $s.hooks.PSObject.Properties.Remove($ev) }
@@ -92,6 +95,20 @@ function Update-NotifyHooks([bool]$Add) {
     $json = $s | ConvertTo-Json -Depth 10
     [IO.File]::WriteAllText($path, $json, (New-Object Text.UTF8Encoding($false)))
     Write-Host "$(if ($Add) {'HOOKS '} else {'UNHOOK'}) $path ($($hookEvents -join ', '))"
+}
+
+# Own toast identity (AUMID) so a click has no executable to launch. Toasts borrowing PowerShell's identity
+# make Windows start powershell.exe on click (a console flashes). Also gives the toast header the Claude name/logo.
+function Register-ToastApp([bool]$Add) {
+    $key = 'HKCU:\Software\Classes\AppUserModelId\Claude.Code.Notify'
+    if (-not $Add) {
+        if (Test-Path $key) { Remove-Item $key -Recurse -Force; Write-Host 'UNREG  toast app Claude.Code.Notify' }
+        return
+    }
+    New-Item -Path $key -Force | Out-Null
+    Set-ItemProperty -Path $key -Name DisplayName -Value 'Claude Code'
+    Set-ItemProperty -Path $key -Name IconUri -Value (Join-Path $repo 'hooks\claude-logo.png')
+    Write-Host 'REG    toast app Claude.Code.Notify'
 }
 
 function Install-BurntToast {
@@ -123,7 +140,7 @@ if ($Uninstall) {
                 ForEach-Object { Remove-Link $_.FullName }
         }
     }
-    if ($doNotify) { Update-NotifyHooks $false }
+    if ($doNotify) { Update-NotifyHooks $false; Register-ToastApp $false }
     return
 }
 
@@ -141,6 +158,7 @@ if ($doLinks) {
 if ($doNotify) {
     if (-not (Test-Path -LiteralPath $notifyScript)) { throw "Missing $notifyScript - did you commit hooks/notify.ps1?" }
     Install-BurntToast
+    Register-ToastApp $true
     Update-NotifyHooks $true
 }
 Write-Host "`nDone. Open a new Claude Code session to pick up the changes."

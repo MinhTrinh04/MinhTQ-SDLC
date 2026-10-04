@@ -86,11 +86,14 @@ Sau khi chạy xong, **mở session Claude Code mới** (hook và skill chỉ đ
 **Phần Notify** — hiện toast Windows (kèm logo Claude) bằng module BurntToast:
 
 - Cài BurntToast cho user hiện tại nếu chưa có (cần internet).
-- Gộp 2 hook vào `~/.claude/settings.json`, **giữ nguyên mọi setting khác** và tự backup thành `settings.json.bak`:
+- Gộp 3 hook vào `~/.claude/settings.json`, **giữ nguyên mọi setting khác** và tự backup thành `settings.json.bak`:
   - `Stop` → toast "Tác vụ đã hoàn thành!" khi Claude làm xong.
   - `Notification` → toast kèm thông điệp khi Claude cần bạn cấp quyền hoặc đang chờ trả lời.
+  - `PreToolUse` (chỉ với `AskUserQuestion`) → toast hiện câu hỏi và các lựa chọn khi Claude cần bạn quyết định (ví dụ cổng duyệt của `/flow`).
 - Hook trỏ thẳng vào `hooks\notify.ps1` trong repo (đường dẫn được tính lúc cài). Nếu **di chuyển repo** sang chỗ khác thì chạy lại `.\install.cmd -Notify`.
 - Logo toast là `hooks\claude-logo.png`; muốn đổi logo chỉ cần thay file này.
+- Toast dùng AppId riêng `Claude.Code.Notify` (đăng ký trong `HKCU`, không cần admin; `-Uninstall -Notify` sẽ gỡ). Nhờ vậy bấm vào toast **không** làm Windows bật cửa sổ cmd/PowerShell như toast mặc định của BurntToast. Cần chạy `.\install.cmd -Notify` thì AppId mới có; chưa đăng ký thì script tự dùng toast mặc định.
+- Gỡ lỗi: đặt biến môi trường `CLAUDE_NOTIFY_DEBUG=1` để ghi mọi payload hook vào `%TEMP%\claude-notify-debug.log`.
 - Nếu không thấy toast: tắt **Focus Assist / Do Not Disturb** trong Windows Settings. Bell âm thanh trong VS Code là tuỳ chọn, bật bằng `terminal.integrated.enableBell: true`.
 
 **Cấu trúc file cài đặt:**
