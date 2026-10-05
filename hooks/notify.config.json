@@ -1,0 +1,11 @@
+{
+  "events": {
+    "Stop": true,
+    "Notification": true,
+    "AskUserQuestion": true
+  },
+  "channels": {
+    "toast":    { "enabled": true, "stopMinSeconds": 0 },
+    "telegram": { "enabled": true, "stopMinSeconds": 60 }
+  }
+}

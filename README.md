@@ -1,243 +1,210 @@
-# Thiết kế hệ thống Loop/Workflow cá nhân cho Claude Code
+# MinhTQ-SDLC
 
-> Tài liệu này là bản spec để đưa cho Claude Code (chạy trên máy cá nhân) tự đọc và triển khai thành hệ thống thật: global CLAUDE.md, subagents, hooks, và slash commands. Mục tiêu: setup 1 lần, mọi project sau chỉ cần gõ lệnh có sẵn.
+Bộ công cụ cho Claude Code trên Windows, gồm hai phần:
 
----
+- **Lệnh và skill** (`/flow`, `/fix-feature`, `/pr`...): quy trình làm việc có kiểm chứng độc lập (brainstorm → plan → execute → verify → review).
+- **Thông báo**: báo cho bạn khi Claude làm xong hoặc cần bạn quyết định, bằng toast Windows và (tuỳ chọn) tin Telegram trên điện thoại.
 
-## 0. Nguyên tắc thiết kế xuyên suốt
+Chi tiết kỹ thuật (kiến trúc, bảo mật, vận hành, xử lý sự cố, phát triển) nằm ở [docs/PROJECT.md](docs/PROJECT.md).
 
-1. **Verify độc lập, không tự chấm điểm**: mọi loop đều phải có bước kiểm tra bằng công cụ thật (test, lint, build, script) — không dựa vào việc Claude tự báo "xong".
-2. **Tách planner khỏi executor**: việc lớn/rủi ro cao luôn đi qua Plan Mode trước, duyệt kế hoạch rồi mới thực thi.
-3. **Giới hạn vòng lặp**: mọi loop tự sửa lỗi phải có max retry (khuyến nghị 3) để tránh chạy vô hạn.
-4. **Con người giữ quyền quyết định cuối** ở 2 điểm: duyệt kế hoạch trước khi chạy việc rủi ro cao, và duyệt trước khi merge/deploy/production.
-5. **Không tự động hoá việc không có tiêu chí "xong" rõ ràng** (kiến trúc, trade-off sản phẩm, UX) — những việc này chỉ nên dùng Claude để hỗ trợ, không để loop tự quyết.
-
----
-
-## 1. Tầng toàn cục (setup 1 lần — áp dụng mọi project)
-
-### 1.1 CLAUDE.md toàn cục (`~/.claude/CLAUDE.md`)
-
-Nội dung cần có:
-
-- Triết lý làm việc: luôn ưu tiên verify bằng test/build thật; nếu project không có test, phải đề xuất viết test trước khi refactor lớn.
-- Quy tắc báo cáo: sau mỗi loop, luôn tóm tắt — đã làm gì, verify bằng cách nào, kết quả pass/fail cụ thể.
-- Mức tự động mặc định: `acceptEdits` cho việc sửa nhỏ có test bảo vệ; luôn hỏi xác nhận cho: xoá file, thao tác DB, deploy, merge.
-- Quy tắc dừng: không tự lặp quá 3 lần cho cùng một lỗi; nếu vẫn fail, dừng và báo cáo chi tiết cho người.
-
-### 1.2 Subagents dùng chung (`~/.claude/agents/`)
-
-| Subagent   | Vai trò                                                                         | Tools cho phép                  |
-| ---------- | ------------------------------------------------------------------------------- | ------------------------------- |
-| `verifier` | Chỉ chạy test/lint/build, không sửa code, báo cáo pass/fail khách quan          | Read, Bash (chỉ lệnh test/lint) |
-| `planner`  | Chỉ lên kế hoạch, không thực thi, output là danh sách bước + rủi ro             | Read, Glob, Grep                |
-| `reviewer` | Review adversarial sau khi code xong, tìm lỗi logic/bảo mật mà test không cover | Read, Glob, Grep                |
-
-### 1.3 Hooks mặc định (`~/.claude/settings.json`)
-
-- `PostToolUse` trên Edit/Write → tự chạy lint/format của project (đọc lệnh test từ CLAUDE.md của project đó, không hardcode).
-- `PreToolUse` trên Bash → chặn các lệnh nguy hiểm (`rm -rf`, thao tác trực tiếp lên DB production, git push --force lên main).
-- `SubagentStop` → log lại kết quả subagent để review sau.
-
-### 1.4 Slash commands toàn cục (`~/.claude/commands/`)
-
-Đây là "menu lệnh" thật sự dùng hằng ngày — chi tiết ở Mục 3.
+## Mục lục
+1. [Setup](#1-setup): [1.1 Cài đặt](#11-cài-đặt-repo-mỗi-máy-một-lần) · [1.2 Thiết lập Telegram](#12-thiết-lập-thông-báo-telegram) · [1.3 Kiểm tra](#13-kiểm-tra-đã-setup-đến-đâu)
+2. [Notify: dùng hằng ngày](#2-notify-dùng-hằng-ngày)
+3. [Lệnh và skill](#3-lệnh-và-skill)
+4. [Tài liệu khác](#4-tài-liệu-khác)
 
 ---
 
-### 1.5 Backup & đồng bộ Tầng 1 qua GitHub (clone + symlink, không clone đè)
+## 1. Setup
 
-Toàn bộ nội dung Tầng 1 (`CLAUDE.md` global, `agents/`, `commands/`, `settings.json`) nên được lưu trong **1 repo GitHub riêng** (ví dụ `claude-code-setup`, khuyến nghị để private vì có thể chứa quy ước nội bộ). Đây là repo dạng "dotfiles", chỉ dùng để backup/version control cho `~/.claude/`, không liên quan đến repo của từng project.
+### 1.1 Cài đặt repo (mỗi máy một lần)
 
-**Không clone trực tiếp đè lên `~/.claude/`** — thư mục này đã có sẵn cache, session history, config khác của Claude Code; clone đè có thể gây xung đột hoặc mất dữ liệu không thuộc repo.
-
-**Cách làm đúng — clone vào thư mục riêng rồi symlink:**
-
-```bash
-# 1. Clone vào thư mục riêng, KHÔNG phải ~/.claude
-git clone https://github.com/<ban>/claude-code-setup.git ~/claude-code-setup
-
-# 2. Symlink từng phần cần thiết vào ~/.claude/
-ln -s ~/claude-code-setup/CLAUDE.md   ~/.claude/CLAUDE.md
-ln -s ~/claude-code-setup/agents      ~/.claude/agents
-ln -s ~/claude-code-setup/commands    ~/.claude/commands
-ln -s ~/claude-code-setup/settings.json ~/.claude/settings.json
+```powershell
+git clone <url-repo> C:\Github\MinhTQ-SDLC    # vào thư mục riêng, KHÔNG phải ~/.claude
+cd C:\Github\MinhTQ-SDLC
+.\install.cmd
 ```
 
-**Vì sao dùng symlink thay vì copy hay clone thẳng:**
+Xong thì **mở session Claude Code mới** (lệnh, skill và thông báo chỉ được nạp lúc session khởi động). Chạy lại bao nhiêu lần cũng được, không cần quyền admin.
 
-- Symlink → sửa file trong `~/claude-code-setup/` (qua `git pull` hoặc sửa tay) thì `~/.claude/` tự động thấy ngay, không cần copy lại thủ công.
-- Copy thường → dễ quên đồng bộ lại, dễ lệch giữa 2 nơi.
-- Clone thẳng vào `~/.claude/` → rủi ro đè mất file hệ thống khác đang nằm chung thư mục.
+| Muốn | Lệnh |
+| --- | --- |
+| Cài tất cả (máy mới) | `.\install.cmd` |
+| Chỉ nối `agents/`, `commands/`, `skills/` vào Claude Code | `.\install.cmd -Links` |
+| Chỉ cài thông báo (toast) | `.\install.cmd -Notify` |
+| Gỡ những gì đã cài | `.\install.cmd -Uninstall` (kèm `-Links` hoặc `-Notify` để gỡ riêng) |
 
-**Khi cài máy mới:** chỉ cần lặp lại đúng 2 bước trên (clone vào thư mục riêng + symlink) là khôi phục lại toàn bộ hệ thống, không mất gì.
+Cài xong là **toast Windows đã dùng được ngay**, không cần cấu hình gì thêm. Lưu ý:
 
-**Khi thêm/sửa command mới (theo Mục 5):** sửa trực tiếp trong `~/claude-code-setup/`, rồi `git add . && git commit && git push` như bình thường — vì đã symlink, `~/.claude/` nhận thay đổi ngay lập tức, không cần thao tác gì thêm.
+- **Đừng clone thẳng vào `~/.claude`** (nơi đó chứa cache và lịch sử của Claude Code) và **đừng dùng `ln -s`** trên Windows (Git Bash chỉ copy file, không tạo link thật).
+- **Dời repo sang thư mục khác:** chạy lại `.\install.cmd`.
+- **Thêm skill mới vào repo:** chạy lại `.\install.cmd -Links` một lần để nối thêm. Lệnh (`commands/`) và subagent (`agents/`) mới thì Claude Code thấy ngay.
 
-**Lưu ý quan trọng:** CLAUDE.md **riêng của từng project** (sinh ra bởi `/project-init`) là file khác — nó nằm trong chính repo của project đó, commit chung với code, **không** đưa vào repo `claude-code-setup` này.
+### 1.2 Thiết lập thông báo Telegram
 
----
+Bước này **tuỳ chọn**: chỉ cần khi bạn muốn nhận tin trên điện thoại. Làm **một lần cho cả hệ thống** (phần A đến C), rồi mỗi máy chạy phần D hoặc E.
 
-## 2. Luồng bootstrap khi gặp project mới
+Hướng dẫn đầy đủ từng bước và cách xử lý lỗi: [docs/PROJECT.md, mục 6](docs/PROJECT.md#6-triển-khai-relay-từng-bước).
 
-```
-Mở project mới trong Claude Code
-        ↓
-Gõ: /project-init
-        ↓
-Claude tự đọc: package.json/requirements.txt, cấu trúc thư mục,
-test runner hiện có, CI config hiện có, convention đặt tên
-        ↓
-Claude tự sinh CLAUDE.md riêng cho project
-  (kế thừa triết lý global, thêm: stack, lệnh test/build/lint cụ thể,
-   convention riêng, các thư mục nhạy cảm không được tự sửa)
-        ↓
-Claude đề xuất: project này hợp dùng loop nào trong danh mục sẵn có
-        ↓
-Bootstrap xong — từ giờ chỉ cần gõ lệnh loop tương ứng
-```
+**A. Telegram**
+1. Chat với `@BotFather` → `/newbot` → lấy **token** (đổi bằng `/revoke` nếu lỡ lộ).
+2. Tạo một **supergroup**, bật *Topics*, tự tạo một topic cho mỗi project, thêm bot vào group và cho làm **admin**.
+3. Chuột phải một tin trong topic → *Copy Message Link* → `https://t.me/c/<chat>/<topic>/<tin>`. Khi đó:
+   - `TELEGRAM_CHAT_ID` = `-100` + `<chat>` (ví dụ `t.me/c/4495729492/2/3` thì chat id là `-1004495729492`).
+   - `<topic>` (ví dụ `2`) là id topic, dùng ở bước D.
 
-Bootstrap chỉ chạy **một lần** cho mỗi project (chạy lại khi stack thay đổi lớn).
+**B. MongoDB Atlas (gói miễn phí M0)**
+1. Tạo cluster **M0 Free**.
+2. *Database Access* → user có role `readWrite` trên **đúng một database** (ví dụ `claude_notify`), mật khẩu mạnh.
+3. *Network Access* → `0.0.0.0/0` (Vercel không có IP cố định).
+4. *Connect* → *Drivers* → copy chuỗi `mongodb+srv://...`. Đây là `MONGODB_URI` (coi như mật khẩu).
 
----
+**C. Vercel**
+1. Đẩy repo lên GitHub, rồi trong Vercel *Import* repo với **Root Directory = `relay`** (Framework: *Other*).
+2. Environment Variables (Production), đặt **một lần**:
 
-## 3. Danh mục slash commands (menu lệnh dùng hằng ngày)
+   | Biến | Giá trị |
+   | --- | --- |
+   | `TELEGRAM_BOT_TOKEN` | token của bot |
+   | `TELEGRAM_CHAT_ID` | `-100...` ở bước A.3 |
+   | `MONGODB_URI` | chuỗi kết nối ở bước B.4 |
+   | `NOTIFY_ADMIN_KEY` | mật khẩu quản trị **tự sinh** (lệnh bên dưới), ≥ 32 ký tự |
 
-### `/project-init`
+   ```powershell
+   $b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
+   ```
+   Lưu chuỗi này vào trình quản lý mật khẩu; bước D cần nhập lại.
+3. Deploy. Kiểm tra: mở `https://<tên-project>.vercel.app/api/notify` trong trình duyệt, phải thấy lỗi **405** (nghĩa là relay đang chạy). `500` là thiếu env; trang đăng nhập Vercel là cần tắt *Deployment Protection* cho Production.
 
-**Dùng khi:** bắt đầu project mới, hoặc project chưa từng bootstrap.
-**Luồng:** khảo sát codebase → sinh CLAUDE.md riêng → đề xuất loop phù hợp → báo cáo tóm tắt.
-**Verify:** không có verify tự động (đây là bước setup) — người đọc lại CLAUDE.md vừa sinh để xác nhận đúng.
+Sau bước C, **thêm máy hay topic mới không cần sửa env hay deploy lại**.
 
-### `/scaffold [mô tả tính năng/spec API]`
+**D. Máy admin (máy của bạn, một lần)**
 
-**Dùng khi:** khởi tạo FE/BE mới, hoặc dựng feature từ đầu theo API contract.
-**Luồng:**
-
-1. Plan Mode: Claude đọc spec (OpenAPI/mô tả), đề xuất cấu trúc file BE + FE + types
-2. Duyệt kế hoạch
-3. Thực thi: sinh BE endpoint, FE service call, types khớp nhau
-4. Verify: build không lỗi, gọi thử endpoint (nếu có test integration)
-   **Stop condition:** build pass là coi như xong; logic nghiệp vụ phức tạp cần người review thêm.
-
-### `/fix-feature [tên tính năng] [mô tả bug]`
-
-**Dùng khi:** sửa chức năng B theo bug report.
-**Luồng:**
-
-1. Đọc mô tả + steps to reproduce
-2. Viết test tái hiện bug (test phải FAIL trước khi sửa — bằng chứng bug có thật)
-3. Sửa code
-4. Chạy lại test — phải PASS
-5. Max 3 lần lặp nếu vẫn fail, sau đó dừng và báo cáo
-   **Verify:** test mới viết ở bước 2, không phải Claude tự nhận xét.
-
-### `/optimize [tên tính năng]`
-
-**Dùng khi:** brainstorm & tối ưu (performance, cấu trúc, query...).
-**Luồng:**
-
-1. Đo baseline thật (benchmark, EXPLAIN ANALYZE, thời gian chạy...)
-2. Claude đề xuất 2-3 phương án kèm trade-off, KHÔNG tự chọn 1 phương án
-3. Người chọn phương án
-4. Thực thi phương án đã chọn
-5. Đo lại, so với baseline — chỉ giữ nếu tốt hơn, không thì revert
-   **Lưu ý:** đây là loại việc "đúng" mang tính chủ quan → không auto-loop toàn bộ, chỉ auto phần đo lường + thực thi sau khi người chọn hướng.
-
-### `/playwright-test [tên feature/flow]`
-
-**Dùng khi:** cần test UI, hoặc vừa sửa FE cần verify bằng Playwright.
-**Luồng:**
-
-1. Nếu chưa có test cho flow này: Claude viết test case Playwright từ mô tả user flow
-2. Chạy test
-3. Nếu fail: đọc trace/screenshot lỗi → sửa code hoặc sửa selector → chạy lại
-4. Max 3 lần lặp
-   **Verify:** kết quả `playwright test` (exit code + report), không phải Claude tự đánh giá UI đẹp/xấu.
-
-### `/pr-description`
-
-**Dùng khi:** vừa push code, cần mô tả PR + changelog.
-**Luồng:**
-
-1. Lấy diff thật (`git diff main...branch`)
-2. Claude đọc diff + commit messages, sinh PR description theo template: What changed / Why / How to test
-3. Update PR qua GitHub (nếu có tool/MCP GitHub) hoặc in ra để người tự dán
-   **Verify:** không auto-merge; người đọc lại mô tả trước khi publish.
-
-### `/migration-safe [mô tả thay đổi schema]`
-
-**Dùng khi:** cần thay đổi DB schema an toàn.
-**Luồng:**
-
-1. Claude viết migration (up + down)
-2. Chạy migration UP trên DB shadow/staging (không phải production)
-3. Verify data integrity (row count, FK constraints)
-4. Chạy migration DOWN (rollback) trên chính DB shadow đó
-5. So sánh schema sau rollback với schema ban đầu — phải khớp 100%
-6. Nếu rollback fail → DỪNG NGAY, cảnh báo, không cho merge
-   **Tuyệt đối không:** tự động chạy trên production, tự động drop bất cứ gì trên DB thật.
-
-### `/review-pr` (adversarial review)
-
-**Dùng khi:** trước khi merge, cần review độc lập với người/subagent viết code.
-**Luồng:** gọi subagent `reviewer` (context sạch, không thấy quá trình viết code) → đọc diff → báo cáo vấn đề cụ thể theo checklist bảo mật/best practice trong CLAUDE.md.
-
-### `/jira-sync` (MCP tích hợp Jira)
-
-**Dùng khi:** cần đọc/cập nhật ticket Jira liên quan tới task đang làm.
-**Yêu cầu setup:** kết nối MCP server Atlassian/Jira (qua `/mcp` hoặc cấu hình `.mcp.json` — cần connector Jira đã được xác thực trên máy).
-**Luồng ví dụ:**
-
-1. Đọc ticket Jira theo ID (mô tả, acceptance criteria)
-2. Dựa trên acceptance criteria, Claude tự tạo checklist việc cần làm
-3. Sau khi code xong + verify pass, tự cập nhật trạng thái/comment vào ticket Jira (báo cáo tóm tắt đã làm gì, kèm link PR)
-   **Lưu ý:** không tự động chuyển ticket sang "Done" nếu chưa qua review con người — chỉ nên tự comment tiến độ hoặc chuyển sang trạng thái "In Review".
-
----
-
-## 4. Vòng lặp sử dụng hằng ngày
-
-```
-Mở project (đã bootstrap) → có việc phát sinh
-        ↓
-Tra bảng lệnh Mục 3 → gõ đúng slash command
-        ↓
-Claude chạy loop nội bộ (plan → execute → verify → lặp nếu cần, tối đa 3 lần)
-        ↓
-Claude báo cáo: đã làm gì / verify bằng gì / kết quả cụ thể
-        ↓
-Người duyệt kết quả cuối (không cần duyệt từng bước nhỏ)
-        ↓
-Việc mới phát sinh → lặp lại từ đầu
+```powershell
+$n = "$HOME\.claude\notify-ctl.cmd"                      # viết tắt cho các lệnh bên dưới
+& $n admin-setup                                         # dán URL https://<app>.vercel.app/api/admin và NOTIFY_ADMIN_KEY (gõ ẩn)
+& $n machine-add laptop -Apply                           # tạo khoá riêng cho CHÍNH máy này, tự lưu
+& $n test                                                # tin vào topic General vì chưa map project
+cd C:\Github\MinhTQ-SDLC                                 # thư mục của một project
+& $n topic-add 2                                         # map project này với topic id 2 (tên thư mục = tên project)
+& $n test                                                # giờ tin vào đúng topic
 ```
 
----
+Rồi **mở session Claude Code mới** để các hook hoạt động.
 
-## 5. Cơ chế tự mở rộng danh mục lệnh
+**E. Thêm máy khác (ví dụ máy công ty)**
 
-Khi phát hiện 1 loop mới hữu ích ở project cụ thể nhưng chưa có trong Mục 3:
+Máy mới **không cần khoá admin**:
 
-```
-Phát hiện pattern lặp lại hữu ích ở project A
-        ↓
-Yêu cầu Claude tổng quát hoá: bỏ chi tiết đặc thù project A,
-giữ lại phần logic dùng chung được
-        ↓
-Đẩy thành slash command mới vào ~/.claude/commands/ (toàn cục)
-        ↓
-Cập nhật bảng danh mục ở Mục 3 (thêm dòng mới)
-        ↓
-Mọi project khác từ giờ có sẵn lệnh này
+1. Trên **máy admin**: `& $n machine-add congty` → in ra khoá của máy đó **một lần duy nhất**, hãy copy lại.
+2. Trên **máy mới**: clone repo, `.\install.cmd`, rồi `& "$HOME\.claude\notify-ctl.cmd" relay-setup` và dán URL `https://<app>.vercel.app/api/notify` cùng khoá vừa copy (gõ ẩn).
+3. Topic cho project của máy đó vẫn thêm **từ máy admin**: `& $n topic-add <tên-project> <id-topic>`.
+
+### 1.3 Kiểm tra đã setup đến đâu
+
+```powershell
+& "$HOME\.claude\notify-ctl.cmd" status
 ```
 
----
+| Dòng báo | Nghĩa |
+| --- | --- |
+| `Snooze: khong (thong bao dang bat)` | thông báo đang bật |
+| `Telegram (qua relay): da cau hinh (...)` | máy này đã nối relay |
+| `Telegram (qua relay): chua cau hinh` | chưa chạy bước D (hoặc E) trên máy này; toast vẫn dùng được |
 
-## 6. Việc cần Claude Code làm ngay khi nhận tài liệu này
+## 2. Notify: dùng hằng ngày
 
-1. Tạo/cập nhật `~/.claude/CLAUDE.md` theo Mục 1.1
-2. Tạo 3 subagent trong `~/.claude/agents/`: `verifier.md`, `planner.md`, `reviewer.md` theo Mục 1.2
-3. Cấu hình hooks mặc định trong `~/.claude/settings.json` theo Mục 1.3 (hỏi người dùng lệnh lint/test mặc định muốn dùng, vì mỗi máy có thể khác)
-4. Tạo các slash command trong `~/.claude/commands/` cho từng lệnh ở Mục 3: `project-init.md`, `scaffold.md`, `fix-feature.md`, `optimize.md`, `playwright-test.md`, `pr-description.md`, `migration-safe.md`, `review-pr.md`, `jira-sync.md`
-5. Với `/jira-sync`: kiểm tra xem đã có MCP Jira/Atlassian connected chưa; nếu chưa, hướng dẫn người dùng cách kết nối trước khi tạo command
-6. Sau khi tạo xong, chạy thử `/project-init` trên project hiện tại để kiểm tra toàn bộ hệ thống hoạt động đúng
+Bạn nhận thông báo khi:
+
+- Claude **làm xong** một lượt (tin điện thoại chỉ báo lượt chạy từ **60 giây** trở lên, để khỏi spam).
+- Claude **cần bạn quyết định** (hỏi chọn phương án, ví dụ các cổng duyệt của `/flow`) hoặc đang chờ phản hồi.
+
+Tin điện thoại cố ý chung chung (`Claude cần bạn đưa ra quyết định ở <project>`): không có code hay đường dẫn.
+
+**Tạm tắt hoặc bật lại** (gõ trong Claude Code hoặc terminal):
+
+| Muốn | Trong Claude Code | Trong terminal |
+| --- | --- | --- |
+| Tắt tất cả 30 phút / 1 / 4 / 8 giờ | `/notify snooze 30m` (`1h`, `4h`, `8h`) | `& $n snooze 1h` |
+| Chỉ tắt tin điện thoại (toast vẫn hiện) | `/notify snooze 4h telegram` | `& $n snooze 4h telegram` |
+| Chỉ tắt toast | `/notify snooze 1h toast` | `& $n snooze 1h toast` |
+| Bật lại ngay | `/notify on` | `& $n on` |
+| Xem trạng thái / gửi thử | `/notify status` / `/notify test` | `& $n status` / `& $n test` |
+
+**Quản lý máy và topic** (chỉ trong terminal, trên máy admin; các lệnh này xử lý khoá bí mật nên không có trong `/notify`):
+
+| Việc | Lệnh |
+| --- | --- |
+| Thêm máy | `& $n machine-add <tên>` (khoá chỉ hiện một lần) |
+| Thu hồi máy (có hiệu lực trong ≤ 30 giây) | `& $n machine-revoke <tên>` |
+| Xem danh sách máy | `& $n machines` |
+| Cho project có topic riêng (chạy trong thư mục project) | `& $n topic-add <id-topic>`, hoặc `& $n topic-add <tên-project> <id-topic>` |
+| Bỏ / xem map topic | `& $n topic-remove [project]` / `& $n topics` |
+| Topic mặc định cho project chưa map | `& $n topic-add _default <id-topic>` |
+
+(`$n = "$HOME\.claude\notify-ctl.cmd"` như ở mục 1.2.D.) Mất khoá của một máy thì tên đó đã bị giữ chỗ: `machine-revoke <tên>` rồi tạo máy mới bằng tên khác.
+
+**Không thấy thông báo?** Tắt *Focus Assist / Do Not Disturb* của Windows và mở session Claude Code mới. Các nguyên nhân khác: [docs/PROJECT.md, mục 8](docs/PROJECT.md#8-xử-lý-sự-cố). Tinh chỉnh lâu dài (tắt hẳn một loại sự kiện, đổi ngưỡng 60 giây) trong `hooks/notify.config.json`.
+
+## 3. Lệnh và skill
+
+### 3.1 Cách đưa yêu cầu vào lệnh
+
+Phần lớn lệnh nhận yêu cầu theo một trong ba cách:
+
+- `--jira <ID>`: lấy từ ticket Jira (cần đã kết nối MCP Jira/Atlassian).
+- `--file <đường-dẫn>`: đọc từ file `.md`, `.txt` hoặc `.pdf` (file `.doc`/`.docx` phải đổi sang `.md` hoặc `.pdf` trước).
+- Văn bản thường: gõ thẳng mô tả sau tên lệnh.
+
+`/flow` và `/flow-batch` thêm được `--auto-approve` để bỏ hai cổng duyệt (thiết kế, kế hoạch); khi đó phần thực thi chạy nền trong một worktree riêng.
+
+### 3.2 Danh mục lệnh
+
+| Lệnh | Dùng khi | Cách gọi |
+| --- | --- | --- |
+| `/flow` | Làm trọn một yêu cầu: brainstorm → plan → execute → verify → review | `/flow --jira ABC-1` · `/flow --file spec.md` · `/flow <mô tả>` |
+| `/flow-batch` | Làm nhiều tính năng liên tiếp; mỗi tính năng duyệt xong là chạy nền ở worktree riêng | `/flow-batch --jira "A-1,A-2"` · `--file "a.md,b.md"` · mỗi dòng một tính năng |
+| `/fix-feature` | Sửa bug nhanh: viết test tái hiện (phải fail), sửa tối thiểu, rồi verify. Không có cổng duyệt | `/fix-feature --jira BUG-9` · `/fix-feature <mô tả bug + cách tái hiện>` |
+| `/scaffold` | Dựng tính năng/API mới: đề xuất 2-3 hướng, bạn chọn, rồi sinh BE endpoint, FE service call và types khớp nhau | `/scaffold <mô tả tính năng>` |
+| `/optimize` | Tối ưu hiệu năng/cấu trúc: đo trước, đề xuất 2-3 cách (bạn chọn), làm, đo lại và giữ hoặc hoàn tác theo kết quả | `/optimize <đối tượng cần tối ưu>` |
+| `/playwright-test` | Viết (hoặc dùng lại) test Playwright cho một luồng UI, chạy và sửa đến khi pass | `/playwright-test <mô tả luồng>` |
+| `/migration-safe` | Viết migration (up + down), chạy thử trên DB shadow/staging (**không bao giờ production**), kiểm tra dữ liệu, rollback và xác nhận schema về đúng như cũ | `/migration-safe <mô tả thay đổi schema>` |
+| `/pr` | Sinh mô tả PR (What / Why / How to test) từ git diff thật, chờ bạn duyệt rồi đăng bằng `gh` | `/pr` (so với `main`) · `/pr <nhánh-gốc>` · `/pr --batch --target <nhánh>` |
+| `/jira-sync` | Đọc ticket để tạo checklist, hoặc đăng bình luận tiến độ (và chuyển "In Review", không bao giờ "Done") | `/jira-sync --read <ID>` · `/jira-sync --update <ID> --pr <url>` |
+| `/loop-engineer` | Chạy không người trực theo lịch: lấy N ticket qua JQL, tự duyệt việc nhỏ rõ ràng, làm ở worktree riêng, việc lớn hoặc mơ hồ thì để lại cho người, và có báo cáo buổi sáng. Không bao giờ merge | `/loop-engineer --mode <sequential\|parallel> --count <N>` |
+| `/notify` | Tạm tắt/bật thông báo, xem trạng thái | xem [mục 2](#2-notify-dùng-hằng-ngày) |
+
+Điểm chung của các lệnh: kết quả kiểm chứng do **công cụ thật** (test, build, lệnh ghi trong `CLAUDE.md` của project) và subagent `verifier` quyết định, không phải Claude tự nhận xét; tự sửa lỗi tối đa 3 vòng; các lệnh dừng chờ bạn ở những điểm quyết định (duyệt thiết kế hoặc kế hoạch, chọn phương án, duyệt mô tả PR). `/pr` và `/loop-engineer` không bao giờ tự merge.
+
+### 3.3 Pipeline `/flow`
+
+```
+brainstorm ──(bạn duyệt thiết kế)──► plan ──(bạn duyệt kế hoạch)──► execute ──► verify (≤ 3 vòng) ──► review
+```
+
+| Bước | Skill / subagent | Làm gì |
+| --- | --- | --- |
+| Brainstorm | skill `flow-brainstorm` | đọc code, phân loại spike / bounded / architectural, hỏi các câu còn mở, đề xuất thiết kế |
+| Plan | skill `flow-plan` + subagent `planner` | khảo sát code thật, viết kế hoạch từng task |
+| Execute | skill `flow-execute` | làm từng task (test trước nếu project có test runner), không làm ngoài kế hoạch |
+| Verify | subagent `verifier` | chạy lệnh test/lint/build thật của project và báo PASS/FAIL khách quan; không sửa code |
+| Review | subagent `reviewer` | soi lỗi logic/bảo mật mà test khó bắt; bắt buộc sau khi verify PASS |
+
+Thiết kế và kế hoạch của các thay đổi lớn được lưu ở `docs/flow/specs/` và `docs/flow/plans/`.
+
+### 3.4 Thêm lệnh hoặc skill mới
+
+- **Lệnh:** thêm `commands/<tên>.md` (Claude Code thấy ngay).
+- **Skill:** thêm `skills/<tên>/SKILL.md`, rồi chạy `.\install.cmd -Links` một lần.
+- **Subagent:** thêm `agents/<tên>.md`.
+- Trước khi commit chạy test của repo, kỳ vọng `PASS`:
+  ```
+  bash -c 'grep -rniE "TBD|todo:|fill in|placeholder" commands/*.md skills/*/SKILL.md agents/*.md && echo FAIL && exit 1 || echo PASS'
+  ```
+- Sửa xong thì `git commit` và `git push` như bình thường.
+
+## 4. Tài liệu khác
+
+- [docs/PROJECT.md](docs/PROJECT.md): kiến trúc, cách `install.cmd` hoạt động, hệ thống thông báo, relay (API, bảo mật), triển khai từng bước, vận hành, xử lý sự cố, quy ước phát triển.
+- `docs/flow/specs/`, `docs/flow/plans/`: thiết kế và kế hoạch do pipeline `/flow` tạo ra.
+- `CLAUDE.md` **riêng của từng project** (nếu có) nằm trong repo của project đó, không đưa vào repo này.
