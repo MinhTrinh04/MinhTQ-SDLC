@@ -156,14 +156,14 @@ Phần lớn lệnh nhận yêu cầu theo một trong ba cách:
 - `--file <đường-dẫn>`: đọc từ file `.md`, `.txt` hoặc `.pdf` (file `.doc`/`.docx` phải đổi sang `.md` hoặc `.pdf` trước).
 - Văn bản thường: gõ thẳng mô tả sau tên lệnh.
 
-`/flow` và `/flow-batch` thêm được `--auto-approve` để bỏ hai cổng duyệt (thiết kế, kế hoạch); khi đó phần thực thi chạy nền trong một worktree riêng.
+`/flow` thêm được `--auto-approve` để bỏ hai cổng duyệt (thiết kế, kế hoạch); khi đó phần thực thi chạy nền trong một worktree riêng. `/batch` luôn chạy nền, mỗi việc một worktree.
 
 ### 3.2 Danh mục lệnh
 
 | Lệnh | Dùng khi | Cách gọi |
 | --- | --- | --- |
 | `/flow` | Làm trọn một yêu cầu: brainstorm → plan → execute → verify → review | `/flow --jira ABC-1` · `/flow --file spec.md` · `/flow <mô tả>` |
-| `/flow-batch` | Làm nhiều tính năng liên tiếp; mỗi tính năng duyệt xong là chạy nền ở worktree riêng | `/flow-batch --jira "A-1,A-2"` · `--file "a.md,b.md"` · mỗi dòng một tính năng |
+| `/batch` | Giao một hoặc nhiều việc cho agent chạy nền, mỗi việc một worktree và một nhánh riêng; tự kiểm lại độc lập rồi mới merge (không push, review nhẹ) | `/batch <mỗi dòng một việc>` · `--file "a.md,b.md"` · `--jira "A-1,A-2"` · cờ `--base`, `--merge`, `--review`, `--serial` |
 | `/fix-feature` | Sửa bug nhanh: viết test tái hiện (phải fail), sửa tối thiểu, rồi verify. Không có cổng duyệt | `/fix-feature --jira BUG-9` · `/fix-feature <mô tả bug + cách tái hiện>` |
 | `/scaffold` | Dựng tính năng/API mới: đề xuất 2-3 hướng, bạn chọn, rồi sinh BE endpoint, FE service call và types khớp nhau | `/scaffold <mô tả tính năng>` |
 | `/optimize` | Tối ưu hiệu năng/cấu trúc: đo trước, đề xuất 2-3 cách (bạn chọn), làm, đo lại và giữ hoặc hoàn tác theo kết quả | `/optimize <đối tượng cần tối ưu>` |
@@ -171,10 +171,9 @@ Phần lớn lệnh nhận yêu cầu theo một trong ba cách:
 | `/migration-safe` | Viết migration (up + down), chạy thử trên DB shadow/staging (**không bao giờ production**), kiểm tra dữ liệu, rollback và xác nhận schema về đúng như cũ | `/migration-safe <mô tả thay đổi schema>` |
 | `/pr` | Sinh mô tả PR (What / Why / How to test) từ git diff thật, chờ bạn duyệt rồi đăng bằng `gh` | `/pr` (so với `main`) · `/pr <nhánh-gốc>` · `/pr --batch --target <nhánh>` |
 | `/jira-sync` | Đọc ticket để tạo checklist, hoặc đăng bình luận tiến độ (và chuyển "In Review", không bao giờ "Done") | `/jira-sync --read <ID>` · `/jira-sync --update <ID> --pr <url>` |
-| `/loop-engineer` | Chạy không người trực theo lịch: lấy N ticket qua JQL, tự duyệt việc nhỏ rõ ràng, làm ở worktree riêng, việc lớn hoặc mơ hồ thì để lại cho người, và có báo cáo buổi sáng. Không bao giờ merge | `/loop-engineer --mode <sequential\|parallel> --count <N>` |
 | `/notify` | Tạm tắt/bật thông báo, xem trạng thái | xem [mục 2](#2-notify-dùng-hằng-ngày) |
 
-Điểm chung của các lệnh: kết quả kiểm chứng do **công cụ thật** (test, build, lệnh ghi trong `CLAUDE.md` của project) và subagent `verifier` quyết định, không phải Claude tự nhận xét; tự sửa lỗi tối đa 3 vòng; các lệnh dừng chờ bạn ở những điểm quyết định (duyệt thiết kế hoặc kế hoạch, chọn phương án, duyệt mô tả PR). `/pr` và `/loop-engineer` không bao giờ tự merge.
+Điểm chung của các lệnh: kết quả kiểm chứng do **công cụ thật** (test, build, lệnh ghi trong `CLAUDE.md` của project) và subagent `verifier` quyết định, không phải Claude tự nhận xét; tự sửa lỗi tối đa 3 vòng; các lệnh dừng chờ bạn ở những điểm quyết định (duyệt thiết kế hoặc kế hoạch, chọn phương án, duyệt mô tả PR). `/pr` không bao giờ tự merge.
 
 ### 3.3 Pipeline `/flow`
 

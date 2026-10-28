@@ -7,7 +7,7 @@ description: First stage of the /flow pipeline. Takes a normalized requirement b
 
 ## Input
 
-You receive one normalized requirement block: `{source: "jira"|"file"|"text", content: "...", origin_link: "..."|null}`, and optionally an `auto_approve: true` instruction from the caller (e.g. `/flow --auto-approve`, `/flow-batch --auto-approve`). `auto_approve` removes both the Step 7 approval gate AND Step 4's live clarifying questions: under `auto_approve`, Step 4 never calls `AskUserQuestion` — instead, for each genuine gap, self-decide the most conservative option and record it as a `Giả định:` line (see Step 4 below). If mid-brainstorm you find real ambiguity that changes the shape of the work, still resolve it via whichever Step 4 branch applies (`AskUserQuestion` when `auto_approve` is not set, self-decide + `Giả định:` record when it is) — never silently skip it either way.
+You receive one normalized requirement block: `{source: "jira"|"file"|"text", content: "...", origin_link: "..."|null}`, and optionally an `auto_approve: true` instruction from the caller (e.g. `/flow --auto-approve`, `/batch --auto-approve`). `auto_approve` removes both the Step 7 approval gate AND Step 4's live clarifying questions: under `auto_approve`, Step 4 never calls `AskUserQuestion` — instead, for each genuine gap, self-decide the most conservative option and record it as a `Giả định:` line (see Step 4 below). If mid-brainstorm you find real ambiguity that changes the shape of the work, still resolve it via whichever Step 4 branch applies (`AskUserQuestion` when `auto_approve` is not set, self-decide + `Giả định:` record when it is) — never silently skip it either way.
 
 ## Process
 

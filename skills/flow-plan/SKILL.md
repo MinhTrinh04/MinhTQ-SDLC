@@ -9,7 +9,7 @@ description: Second stage of the /flow pipeline. Takes an approved design/spec, 
 
 The approved design (chat text) or spec file path from `flow-brainstorm`. You only run after that approval has been given. If invoked by a command that explicitly states the input is already an approved design (e.g. `/scaffold` passing a spec/API description that skips `flow-brainstorm` entirely), trust that statement and proceed directly — do not ask for a second confirmation, that would be a redundant gate the caller already accounted for. Only ask for confirmation when invoked with no such statement and it's genuinely unclear whether approval happened.
 
-Optionally, the caller may also pass an `auto_approve: true` instruction (e.g. from `/flow --auto-approve`, `/flow-batch --auto-approve`). This only removes the Step 6 approval gate — it never skips Step 5's self-review or lets unfinished stand-in content slip through.
+Optionally, the caller may also pass an `auto_approve: true` instruction (e.g. from `/flow --auto-approve`, `/batch --auto-approve`). This only removes the Step 6 approval gate — it never skips Step 5's self-review or lets unfinished stand-in content slip through.
 
 ## Process
 

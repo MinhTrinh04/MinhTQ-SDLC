@@ -28,7 +28,7 @@ The content here is a **bug report + steps to reproduce**, not a feature spec �
 
 ## Hard rules
 
-- Never invoke `flow-brainstorm` or `flow-plan` from this command — there is no approval gate, by design, unlike `/flow` and `/flow-batch`.
+- Never invoke `flow-brainstorm` or `flow-plan` from this command — there is no approval gate, by design, unlike `/flow` and `/batch`.
 - Never invent a Jira ID or file content if the fetch/read fails — stop and report the actual error.
 - Never skip writing the record-keeping plan file, even though there is no approval wait on it.
 - Never let `flow-execute` skip its own verify/review loop — this command relies on it entirely for the "max 3 lần lặp" requirement; do not add a second retry loop here.

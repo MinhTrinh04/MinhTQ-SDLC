@@ -47,7 +47,7 @@ Note on tool names: the exact Jira/Atlassian MCP tool names (e.g. `mcp__<connect
 ## `--update <ticket-ID> --pr <url>` mode
 
 1. Require both `<ticket-ID>` and `--pr <url>` to be present. If either is missing, say so plainly and STOP — do not guess a PR URL or ticket ID.
-2. This command does not run verify itself — it is invoked only after verify has already passed elsewhere (e.g. as the last step of a `/flow` or `/flow-batch` run). Do not re-run tests/lint/build here.
+2. This command does not run verify itself — it is invoked only after verify has already passed elsewhere (e.g. as the last step of a `/flow` or `/batch` run). Do not re-run tests/lint/build here.
 3. Compose a progress comment: a short summary of what was done (supplied by whatever invoked this command, or asked of the user if not supplied) plus the PR link from `--pr`.
 4. Post that comment to the ticket via the Jira/Atlassian MCP (capability: add comment to issue).
 5. Status transition is OPTIONAL and, if performed, may ONLY ever set the ticket to "In Review" — NEVER "Done", NEVER any other terminal/closing status, under any framing, even if a future invocation of this command explicitly asks for "Done". Moving a ticket to "Done" requires a human acting directly in Jira, not this command, ever.

@@ -25,16 +25,16 @@ No other input form is supported — do not guess the source from the argument's
 5. **If `--auto-approve` was NOT passed:** wait for explicit human approval of the plan the same way. **If `--auto-approve` was passed:** `flow-plan` commits the plan itself and returns — no live wait.
 6. Execute:
    - **Without `--auto-approve`:** invoke the `flow-execute` skill directly with the approved plan's file path, inline in this session (unchanged from prior behavior).
-   - **With `--auto-approve`:** dispatch execution via the `Agent` tool with `isolation: "worktree"`, backgrounded by default (same prompt shape as `/flow-batch`'s Pha 2 dispatch, for this one feature/ticket). Report the worktree path and branch name immediately, then continue — do not block this session waiting for it.
+   - **With `--auto-approve`:** dispatch execution via the `Agent` tool with `isolation: "worktree"`, backgrounded by default (same prompt shape as `/batch` dispatch, for this one feature/ticket). Report the worktree path and branch name immediately, then continue — do not block this session waiting for it.
 7. Print the final report verbatim to the user — `flow-execute`'s direct return (non-auto-approve path) or the dispatched Agent's report when its background task-notification arrives (auto-approve path). Do not summarize away a FAIL into something softer.
 
 ## Auto-approve mode (`--auto-approve`)
 
 - Removes both approval gates (design, plan) — `flow-brainstorm`/`flow-plan` write and commit their files unattended instead of stopping for a human click.
 - Never suppresses `flow-brainstorm`'s Step 4 genuine clarifying questions or `flow-plan`'s Step 5 self-review — those still run; only the final approve/reject stop is skipped.
-- Moves execution off the main thread into an isolated git worktree (mirrors `/flow-batch`'s Pha 2), instead of running inline — so a run started with `--auto-approve` never blocks the chat waiting on `flow-execute`.
+- Moves execution off the main thread into an isolated git worktree (mirrors `/batch`), instead of running inline — so a run started with `--auto-approve` never blocks the chat waiting on `flow-execute`.
 - Never skips `flow-execute`'s own verify (≤3 retry rounds) or mandatory `reviewer` — those are unchanged; `--auto-approve` only removes the two human gates before execution starts.
-- Never merges anything — the dispatched Agent only produces a review-ready branch, exactly like `/flow-batch`; merging still goes through `/pr` and its own gate.
+- Never merges anything — the dispatched Agent only produces a review-ready branch, exactly like `/batch`; merging still goes through `/pr` and its own gate.
 
 ## Quiet delegation (whenever you dispatch a subagent)
 

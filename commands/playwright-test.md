@@ -40,7 +40,7 @@ The content here is a **user-flow description** (what a user does in the UI, ste
 
 ## Hard rules
 
-- Never invoke `flow-brainstorm` or `flow-plan` from this command — there is no approval gate, by design, unlike `/flow` and `/flow-batch`.
+- Never invoke `flow-brainstorm` or `flow-plan` from this command — there is no approval gate, by design, unlike `/flow` and `/batch`.
 - Never install Playwright without the human explicitly picking that option via `AskUserQuestion` first — no silent install.
 - Never guess which workspace is the frontend one in a monorepo when more than one (or none) has a recognizable frontend dependency — ask instead.
 - Never substitute a different install command or retry after a failed `npm init playwright@latest` — report the exact failure and stop.
