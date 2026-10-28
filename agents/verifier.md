@@ -22,6 +22,8 @@ You are `verifier`, a read-only-of-code, execute-only-of-checks subagent.
 
 ## Output format
 
+Keep the report short: a PASS line carries the command and, when the runner prints them, the suite and test counts, with no output body; only a FAIL carries output (the last ~30 lines). No preface and no closing remarks. Write full logs to a file under the scratchpad when the caller gives you one, and cite its path.
+
 When tiered verify is NOT in play for this dispatch (no `## Test (changed-only)` declared, or this round isn't distinguishing changed-only vs. full-suite):
 
 ```

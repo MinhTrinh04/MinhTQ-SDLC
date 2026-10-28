@@ -34,6 +34,11 @@ Optionally, the caller may also pass an `auto_approve: true` instruction (e.g. f
      - **"Reject":** stop here. Leave the file on disk, uncommitted — do not delete it (the human may still want to see the draft) and do not commit it under any circumstance.
    - **If `auto_approve` was set:** skip `AskUserQuestion` entirely. `git add`/`git commit` the plan file immediately. Print one line — `Auto-approved (--auto-approve): plan committed at <path> (N tasks).` — and return control to the caller.
 
+## Quiet delegation (whenever you dispatch `planner`)
+
+- End the `planner` prompt with an output budget: "Return only the plan. No preface and no recap of what you surveyed."
+- Do not narrate the survey while it runs and do not echo the planner's draft into chat; the plan file is the reading surface (see the rule below). Relay at most a short summary (task count, one line per task).
+
 ## Hard rules
 
 - Never create a new dated plan file for a feature that already has one — append a new Task section to the existing `docs/flow/plans/<feature>-plan.md` instead. A new file is only for a feature with no existing plan doc at all.

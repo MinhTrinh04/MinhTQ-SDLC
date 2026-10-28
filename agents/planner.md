@@ -23,3 +23,5 @@ You receive an approved design/change description. You:
 ## Output format
 
 A markdown implementation plan: task list, each task with Files/Interfaces/Steps, matching the bite-sized-step convention (one action per step, test-first where a test runner exists).
+
+Return only the plan: no preface, no recap of what you surveyed, no closing remarks. Honor any output budget the caller gives you.

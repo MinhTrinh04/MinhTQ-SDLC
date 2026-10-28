@@ -24,6 +24,12 @@ The approved plan file path from `flow-plan`.
 5. On verify PASS, dispatch the `reviewer` subagent with the full diff — this step is **mandatory**, never skipped, never optional.
 6. Produce the final report: what was done, which commands verified it (with PASS/FAIL per command), what `reviewer` found (or "No issues found").
 
+## Quiet delegation (whenever you dispatch `verifier` or `reviewer`)
+
+- End every subagent prompt with an output budget: "Return a condensed report of at most 30 lines. Do not paste command output except the last ~15 lines of a failure. Keep full logs in a file under the scratchpad and give its path."
+- Relay, do not echo: tell the user at most 8 lines per subagent (status, counts, number of findings and the most severe one, any decision needed). Print full text only for a FAIL or for `reviewer` findings (one line each, never trimmed). Never paste a whole subagent report into chat.
+- Do not narrate a subagent's progress while it runs, and never read or tail a background agent's output file; wait for its report.
+
 ## Hard rules
 
 - Never touch files outside what the plan's Files sections list.

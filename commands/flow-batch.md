@@ -67,6 +67,12 @@ Each dispatched Agent's completion arrives later as a background task-notificati
 - Does not change Pha 2 at all — dispatch was already immediate, isolated (worktree), and backgrounded before this flag existed.
 - Never merges anything — same as without the flag, `/pr` and its own gate still own merging.
 
+## Quiet delegation (whenever you dispatch a subagent)
+
+- End every subagent prompt (the Pha 2 prompt included) with an output budget: "Return a condensed report of at most 30 lines. Do not paste command output except the last ~15 lines of a failure. Keep full logs in a file under the scratchpad and give its path."
+- Never read or tail a background agent's output file (its transcript is large); wait for its notification. Do not narrate progress while it runs.
+- Relay, do not echo: per feature at most 8 lines (name, status, verify round count, number of findings and the most severe one, worktree and branch). Full text only for a FAIL or for review findings (one line each, never trimmed). Never paste a whole agent report into chat.
+
 ## Hard rules
 
 - Never dispatch a feature's Pha 2 Agent call before that specific feature's plan is approved (or committed, under `--auto-approve`) — other features in the batch may still be earlier in Pha 1 at that moment, and that's fine.

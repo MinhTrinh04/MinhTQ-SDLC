@@ -36,6 +36,13 @@ No other input form is supported — do not guess the source from the argument's
 - Never skips `flow-execute`'s own verify (≤3 retry rounds) or mandatory `reviewer` — those are unchanged; `--auto-approve` only removes the two human gates before execution starts.
 - Never merges anything — the dispatched Agent only produces a review-ready branch, exactly like `/flow-batch`; merging still goes through `/pr` and its own gate.
 
+## Quiet delegation (whenever you dispatch a subagent)
+
+- End every subagent prompt with an output budget: "Return a condensed report of at most 30 lines. Do not paste command output except the last ~15 lines of a failure. Keep full logs in a file under the scratchpad and give its path."
+- Prefer `run_in_background: true` when your next step does not depend on the result; use foreground only when you must have the result to continue.
+- Never read or tail a background agent's output file (its transcript is large); wait for its report. Do not narrate progress while it runs.
+- Relay, do not echo: at most 8 lines per subagent (status, counts, number of findings and the most severe one, any decision needed). Full text only for a FAIL or for findings (one line each, never trimmed). Never paste a whole subagent report into chat.
+
 ## Hard rules
 
 - Never skip an approval wait because the change "looks small" — unless `--auto-approve` was explicitly passed.
