@@ -156,14 +156,14 @@ Phần lớn lệnh nhận yêu cầu theo một trong ba cách:
 - `--file <đường-dẫn>`: đọc từ file `.md`, `.txt` hoặc `.pdf` (file `.doc`/`.docx` phải đổi sang `.md` hoặc `.pdf` trước).
 - Văn bản thường: gõ thẳng mô tả sau tên lệnh.
 
-`/flow` thêm được `--auto-approve` để bỏ hai cổng duyệt (thiết kế, kế hoạch); khi đó phần thực thi chạy nền trong một worktree riêng. `/batch` luôn chạy nền, mỗi việc một worktree.
+`/flow` thêm được `--auto-approve` để bỏ hai cổng duyệt (thiết kế, kế hoạch); khi đó phần thực thi chạy nền trong một worktree riêng. `/delegate` luôn chạy nền, mỗi việc một worktree.
 
 ### 3.2 Danh mục lệnh
 
 | Lệnh | Dùng khi | Cách gọi |
 | --- | --- | --- |
 | `/flow` | Làm trọn một yêu cầu: brainstorm → plan → execute → verify → review | `/flow --jira ABC-1` · `/flow --file spec.md` · `/flow <mô tả>` |
-| `/batch` | Giao một hoặc nhiều việc cho agent chạy nền, mỗi việc một worktree và một nhánh riêng; tự kiểm lại độc lập rồi mới merge (không push, review nhẹ) | `/batch <mỗi dòng một việc>` · `--file "a.md,b.md"` · `--jira "A-1,A-2"` · cờ `--base`, `--merge`, `--review`, `--serial` |
+| `/delegate` | Giao một hoặc nhiều việc cho agent chạy nền, mỗi việc một worktree và một nhánh riêng; tự kiểm lại độc lập rồi mới merge (không push, review nhẹ) | `/delegate <mỗi dòng một việc>` · `--file "a.md,b.md"` · `--jira "A-1,A-2"` · cờ `--base`, `--merge`, `--review`, `--serial` |
 | `/fix-feature` | Sửa bug nhanh: viết test tái hiện (phải fail), sửa tối thiểu, rồi verify. Không có cổng duyệt | `/fix-feature --jira BUG-9` · `/fix-feature <mô tả bug + cách tái hiện>` |
 | `/scaffold` | Dựng tính năng/API mới: đề xuất 2-3 hướng, bạn chọn, rồi sinh BE endpoint, FE service call và types khớp nhau | `/scaffold <mô tả tính năng>` |
 | `/optimize` | Tối ưu hiệu năng/cấu trúc: đo trước, đề xuất 2-3 cách (bạn chọn), làm, đo lại và giữ hoặc hoàn tác theo kết quả | `/optimize <đối tượng cần tối ưu>` |

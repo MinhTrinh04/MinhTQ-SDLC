@@ -2,7 +2,7 @@
 description: Delegate one or more tasks to background worktree agents (one agent, one isolated worktree, one branch per task), verify each result independently, and merge into the base branch only after the gate is green. No push, light review.
 ---
 
-# /batch
+# /delegate
 
 Arguments: `$ARGUMENTS` — the tasks, in one of these forms:
 - Plain text, one task per line (each non-empty line is one task; a task may be a paragraph if its lines are indented under it).
